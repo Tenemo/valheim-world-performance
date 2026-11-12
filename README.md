@@ -80,6 +80,10 @@ Progression Fix 1.11.0 requires World Performance. With older Progression Fix ve
 
 Remove the mod through your mod manager, or remove its folder from `BepInEx/plugins` while the game is closed.
 
+## Report a problem
+
+Report bugs and ideas on [GitHub](https://github.com/Tenemo/valheim-world-performance/issues). Include the mod's version and your `BepInEx/LogOutput.log`.
+
 ## Credits
 
 Built with AI assistance. Release notes are in `CHANGELOG.md`.
