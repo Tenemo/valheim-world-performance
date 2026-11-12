@@ -1,0 +1,2 @@
+# Text is committed with LF endings in every checkout.
+* text=auto eol=lf

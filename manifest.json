@@ -1,0 +1,9 @@
+{
+  "name": "WorldPerformance",
+  "version_number": "0.11.3",
+  "website_url": "",
+  "description": "Smoother large bases and fewer save and loading hitches. Draws buildings and scenery from merged meshes and reduces work for effects, sounds, doors, water, terrain and networking. Requires only BepInEx; Better Networking is optional.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2351"
+  ]
+}

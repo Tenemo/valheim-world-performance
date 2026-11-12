@@ -1,0 +1,7 @@
+[package]
+namespace = "Tenemo"
+name = "WorldPerformance"
+
+[publish]
+repository = "https://hexium.gg"
+communities = ["valheim"]
