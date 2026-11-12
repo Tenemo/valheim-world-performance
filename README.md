@@ -82,7 +82,7 @@ Remove the mod through your mod manager, or remove its folder from `BepInEx/plug
 
 ## Report a problem
 
-Report bugs and ideas on [GitHub](https://github.com/Tenemo/valheim-world-performance/issues). Include the mod's version and your `BepInEx/LogOutput.log`.
+Report bugs and ideas on [GitHub](https://github.com/Tenemo/valheim-world-performance/issues), or message `tenemo` on Discord. Include the mod's version and your `BepInEx/LogOutput.log`.
 
 ## Credits
 
