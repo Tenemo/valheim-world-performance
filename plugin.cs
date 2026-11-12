@@ -20,6 +20,7 @@ namespace WorldPerformance
     [BepInDependency(PluginIds.MultiUserChest, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.FastLink, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.EpicLoot, BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency(PluginIds.EquipmentAndQuickSlots, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.WieldWhileSwimming, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.AzuClock, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.BetterBeehives, BepInDependency.DependencyFlags.SoftDependency)]
