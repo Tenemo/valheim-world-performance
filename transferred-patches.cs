@@ -127,6 +127,7 @@ namespace WorldPerformance
                 Optional(typeof(ConfigFileStats), ConfigFileStats.Initialize);
                 Optional(typeof(BountyLedgerWrites), BountyLedgerWrites.Initialize);
                 Optional(typeof(ServerListQueries), ServerListQueries.Initialize);
+                Optional(typeof(SteamServerJoins), SteamServerJoins.Initialize);
                 Optional(typeof(QuickStackUnload), QuickStackUnload.Initialize);
                 Optional(typeof(CraftyBoxesUnload), patches => CraftyBoxesUnload.Initialize(patches, Plugin.Log));
                 Optional(typeof(InventoryLocks), InventoryLocks.Initialize);
