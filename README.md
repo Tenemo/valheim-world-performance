@@ -64,6 +64,8 @@ Install **WorldPerformance** from [Hexium](https://valheim.hexium.gg) through Ga
 
 Install it on each player's client that should benefit. It can be used without installing it on the server. Servers that restrict client mods must allow the plugin ID `tenemo.WorldPerformance`.
 
+[TenemoPack](https://valheim.hexium.gg/mods/Tenemo/TenemoPack) installs it through Gale together with the mods and settings it was developed with.
+
 If upgrading from a manually installed private copy, remove its old `Tenemo.WorldPerformance.dll`, `local-features-only` and `spatial-renderer` files before installing the package so the game loads only one copy with the full feature set.
 
 ## Compatibility
