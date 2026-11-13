@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- The mod page gives one short point per improvement, lists the long-session fixes, recommends TenemoPack and asks for problem reports in its Hexium threads.
+
 ## 1.0.0
 
 - First stable release, with no changes in play since 0.12.0.
