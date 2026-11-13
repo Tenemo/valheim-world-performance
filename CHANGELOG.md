@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+
+- Joining a server without crossplay by its address takes about 7 seconds less from the second join on: the game no longer searches PlayFab for a crossplay server it has already joined through Steam.
+- With Drop That, a server no longer stops for up to 4 seconds when a player joins.
+- Epic Loot's and Equipment and Quick Slots' config file checks and Epic Loot's bounty ledger saves no longer freeze the game or a server for seconds while the disk is busy.
+
 ## 0.11.3
 
 - Faster startup stays available across compatible Progression Fix updates without another World Performance update.

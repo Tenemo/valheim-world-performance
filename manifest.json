@@ -1,6 +1,6 @@
 {
   "name": "WorldPerformance",
-  "version_number": "0.11.3",
+  "version_number": "0.12.0",
   "website_url": "https://github.com/Tenemo/valheim-world-performance",
   "description": "Smoother large bases and fewer save and loading hitches. Draws buildings and scenery from merged meshes and reduces work for effects, sounds, doors, water, terrain and networking. Requires only BepInEx; Better Networking is optional.",
   "dependencies": [
