@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using BepInEx.Logging;
 using HarmonyLib;
+using UnityEngine;
 
 namespace WorldPerformance
 {
@@ -12,7 +13,8 @@ namespace WorldPerformance
     // every join, on the server's main thread: the pack's 6,400 star-drop entries became 7.8 MB of text and 125 KB
     // compressed, which held up the server for everyone for about 1.3 seconds a join. The packed creature and container
     // drop tables are now kept and sent again until Drop That loads new tables, as its reload command does, and the packed
-    // location list until a join's list differs from it. Its general settings are still packed for each join. What
+    // location list until a join's list differs from it. Its general settings are still packed for each join. A server
+    // packs the kept messages once its world has loaded, so the first join after a start waits for none of them. What
     // players receive is unchanged.
     internal static class DropThatSyncCache
     {
@@ -21,6 +23,8 @@ namespace WorldPerformance
         private static readonly Dictionary<Type, Func<object, object>> TablesOf = new Dictionary<Type, Func<object, object>>();
         private static readonly Dictionary<Type, Func<object, object, bool>> SameAs = new Dictionary<Type, Func<object, object, bool>>();
         private static readonly Dictionary<MethodBase, Type> ChangedTables = new Dictionary<MethodBase, Type>();
+        private static IDictionary handlers;
+        private static MethodInfo packer, initialize, serializerFor, packWith;
 
         internal static void Initialize(PerformancePatches harmony, ManualLogSource log)
         {
@@ -57,9 +61,42 @@ namespace WorldPerformance
             TablesOf[locations] = sent => sent;
             SameAs[locations] = (current, previous) => SameItems((Array)names.GetValue(current), (Array)names.GetValue(previous)) &&
                 SameItems((Array)places.GetValue(current), (Array)places.GetValue(previous));
+            // Drop That's own message builders and packing, as a join uses them.
+            handlers = AccessTools.PropertyGetter(assembly.GetType("DropThat.Core.SyncManager"), "PackageHandlers")?.Invoke(null, null) as IDictionary;
+            packer = AccessTools.PropertyGetter(assembly.GetType("DropThat.Core.SyncManager+HandlerPair"), "Packer");
+            initialize = AccessTools.Method(assembly.GetType("ThatCore.Network.IMessage"), "Initialize");
+            serializerFor = AccessTools.Method(assembly.GetType("ThatCore.Network.SerializerManager"), "GetSerializer", new[] { typeof(Type) });
+            packWith = pack;
+            if (handlers == null || packer == null || initialize == null || serializerFor == null) throw new InvalidOperationException("Drop That's join synchronization changed.");
+            harmony.Patch(AccessTools.Method(typeof(ZoneSystem), "Start"), postfix: new HarmonyMethod(typeof(DropThatSyncCache), nameof(WarmWhenLoaded)));
             harmony.Patch(pack, prefix: new HarmonyMethod(typeof(DropThatSyncCache), nameof(UsePacked)),
                 postfix: new HarmonyMethod(typeof(DropThatSyncCache), nameof(KeepPacked)));
             log.LogInfo("Drop That's drop tables and location list are packed once for joining players instead of for each join.");
+        }
+
+        private static void WarmWhenLoaded(ZoneSystem __instance)
+        {
+            if (ZNet.instance != null && ZNet.instance.IsServer()) __instance.StartCoroutine(Warm(__instance));
+        }
+
+        // Waits for the world's locations, then packs each kept message the way a join would.
+        private static IEnumerator Warm(ZoneSystem zones)
+        {
+            float deadline = Time.realtimeSinceStartup + 120f;
+            while (zones && zones.m_locationInstances.Count == 0 && Time.realtimeSinceStartup < deadline) yield return null;
+            yield return null;
+            if (!zones) yield break;
+            foreach (var handler in handlers.Values.Cast<object>().ToArray())
+            {
+                try
+                {
+                    var message = ((Delegate)packer.Invoke(handler, null)).DynamicInvoke();
+                    if (message == null || !TablesOf.ContainsKey(message.GetType())) continue;
+                    initialize.Invoke(message, null);
+                    packWith.Invoke(serializerFor.Invoke(null, new object[] { message.GetType() }), new[] { message });
+                }
+                catch (Exception error) { Plugin.Fallback("DropThatSyncCache could not pack a message ahead of the first join: " + error.GetBaseException().Message); }
+            }
         }
 
         private static void Invalidate(MethodBase __originalMethod) => Packed.Remove(ChangedTables[__originalMethod]);
