@@ -36,6 +36,7 @@ The only visible differences are small: crops and other small objects more than 
 - **Loading screens end sooner.** Arriving at a large base takes about 3 seconds less, or 9 to 14 with a large mod pack. Portal trips end about a second sooner, and joining at your base or respawning at a bed about 2 seconds sooner.
 - **Rejoining a server is faster.** A server you've joined before loads several seconds faster, and about 7 seconds faster still if it has no crossplay.
 - **Smoother multiplayer.** Each player's connection gets as much as it can carry, and objects whose owner left go to the player best able to look after them.
+- **Long sessions stay fast.** The build menu no longer slows down with each opening, creatures' pathfinding no longer gets heavier over a session, and chests, inventories, icons and labels that Quick Stack, AzuCraftyBoxes, MultiUserChest, BetterUI and the game kept for the whole session are let go once they're gone.
 - **Many smaller savings.** Building support, ground heights, water, terrain paint, plants, cooking, floating objects, swimming, network data, FastLink, FedoHud, BetterUI, NoSmokeStayLit and TameRidingOverhaul all do less repeated work.
 
 ## Recommended mod pack
