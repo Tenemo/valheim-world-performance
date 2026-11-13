@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0
+
+- First stable release, with no changes in play since 0.12.0.
+
 ## 0.12.0
 
 - Joining a server without crossplay by its address takes about 7 seconds less from the second join on: the game no longer searches PlayFab for a crossplay server it has already joined through Steam.
