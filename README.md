@@ -24,6 +24,17 @@ The only visible differences are small: crops and other small objects more than 
 - **Smoother multiplayer.** Steam update windows are sized to each connection, including when other mods wrap a player's connection as they join. An object whose owner left or moved away goes to the player whose connection can carry it best.
 - **Many smaller savings.** Navigation links stay stable during travel; grounded and settled building support, ground heights, water updates and Drop That synchronization data are reused; terrain paint, plant checks, cooking models, floating objects, swimming checks and network packages do less repeated work; FastLink stops querying the server list while you play; FedoHud makes its beehive and crop icons only while they are turned on; BetterUI's enemy health numbers, NoSmokeStayLit's fires and cooking slots, AzuCraftyBoxes' chest loading and TameRidingOverhaul's tames skip repeated work.
 
+## Recommended mod pack
+
+World Performance was built and tested inside [TenemoPack](https://valheim.hexium.gg/mods/Tenemo/TenemoPack), the mod pack of our long-running private server, and that's where it helps most.
+
+- **The figures above come from it.** "Our pack" means TenemoPack: 46 mods with their settings, World Performance included.
+- **It speeds up the pack's other mods too.** Epic Loot, AzuCraftyBoxes, ComfortMe, BetterUI, Better Beehives, Treadwell, Quick Stack Store, Drop That, FedoHud and others each do less repeated work, checked against the exact versions the pack installs. With a different version of one of those mods, only that mod's saving turns off.
+- **It's a whole game setup.** Hard combat against star-level creatures, EpicLoot loot that follows the biomes, building, crafting, storage and sailing helpers, and the settings that tie them together, all installed in one go through Gale.
+- **Everyone on a server needs the same pack version.** Some of its mods refuse players on another version.
+
+World Performance also works on its own: it needs only BepInEx and works with any other mods.
+
 ## Smooth Motion on NVIDIA cards
 
 On an RTX 40 or 50 series card, NVIDIA's Smooth Motion makes Valheim run much smoother, and it has worked great in our games. It adds a generated frame between each pair the game draws, so you see about twice the frame rate. This suits Valheim especially well: at a big base the processor, not the graphics card, limits the frame rate. Even an RTX 4090 runs only 50 to 68 FPS there and sits idle for much of each frame, so it has the time to make the extra frames without slowing the game down.
