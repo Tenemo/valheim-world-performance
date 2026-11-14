@@ -29,6 +29,7 @@ namespace WorldPerformance
     [BepInDependency(PluginIds.NoSmokeStayLit, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.TameRidingOverhaul, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(PluginIds.Treadwell, BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency(PluginIds.StarLevelSystem, BepInDependency.DependencyFlags.SoftDependency)]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "tenemo.WorldPerformance";
