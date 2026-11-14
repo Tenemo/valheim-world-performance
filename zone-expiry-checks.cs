@@ -105,7 +105,14 @@ namespace WorldPerformance
             for (int slot = 0; slot < slots; slot++)
             {
                 var view = instanceIn(instances, slot);
-                if (!view || view.m_distant) continue;
+                // A slot whose instance is gone lets go of it, so nothing here keeps an unloaded object.
+                if (!view)
+                {
+                    views[slot] = null;
+                    transforms[slot] = null;
+                    continue;
+                }
+                if (view.m_distant) continue;
                 if (!ReferenceEquals(views[slot], view))
                 {
                     views[slot] = view;
