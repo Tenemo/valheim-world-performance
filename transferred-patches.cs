@@ -153,6 +153,7 @@ namespace WorldPerformance
                 Optional(typeof(TameSitUpdate), patches => TameSitUpdate.Initialize(patches, Plugin.Log));
                 Optional(typeof(TreadwellBrushes), patches => TreadwellBrushes.Initialize(patches, Plugin.Log));
                 Optional(typeof(CraftyBoxesCounts), patches => CraftyBoxesCounts.Initialize(patches, Plugin.Log));
+                Optional(typeof(CraftyBoxesPrefabNames), patches => CraftyBoxesPrefabNames.Initialize(patches, Plugin.Log));
                 Optional(typeof(SavedItemMagic), patches => SavedItemMagic.Initialize(patches, Plugin.Log));
                 Optional(typeof(SavedItemCopies), patches => SavedItemCopies.Initialize(patches, Plugin.Log));
                 Optional(typeof(OwnedCopies), OwnedCopies.Initialize);

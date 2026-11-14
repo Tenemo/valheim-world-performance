@@ -128,4 +128,46 @@ namespace WorldPerformance
             return false;
         }
     }
+
+    // AzuCraftyBoxes' Epic Loot storage finds an item's prefab name from its name key by walking every item the game knows,
+    // on every count and removal, so each cost tile and Convert Materials row at the enchanting table walked the whole
+    // item list several times as a list filled. The names come from the world's item list, which stays the same for a
+    // world, so a table built once from it gives the same first match.
+    internal static class CraftyBoxesPrefabNames
+    {
+        // The shipped feature; the isolated client switches it off and on for paired measurements.
+        internal static bool Shortcut = true;
+        private static readonly Dictionary<string, string> names = new Dictionary<string, string>();
+        private static ObjectDB builtFrom;
+        private static int builtCount = -1;
+
+        internal static void Initialize(PerformancePatches harmony, ManualLogSource log)
+        {
+            if (!PluginIds.TryGet(PluginIds.AzuCraftyBoxes, out var plugin)) return;
+            var compat = plugin.Instance.GetType().Assembly.GetType("AzuCraftyBoxes.Compatibility.EpicLootCompat");
+            var lookup = compat == null ? null : AccessTools.Method(compat, "PrefabNameOf", new[] { typeof(string) });
+            if (lookup == null || lookup.ReturnType != typeof(string) || !lookup.IsStatic)
+                throw new InvalidOperationException("AzuCraftyBoxes' Epic Loot prefab name lookup changed.");
+            harmony.Patch(lookup, prefix: new HarmonyMethod(typeof(CraftyBoxesPrefabNames), nameof(Named)));
+            log.LogInfo("AzuCraftyBoxes' Epic Loot storage finds prefab names from a table built once per item list.");
+        }
+
+        // The same answer as the walk: the first prefab with an item drop of that name, or the name itself.
+        private static bool Named(string sharedName, ref string __result)
+        {
+            var database = ObjectDB.instance;
+            if (!Shortcut || database == null || sharedName == null) return true;
+            if (database != builtFrom || database.m_items.Count != builtCount)
+            {
+                names.Clear();
+                foreach (var prefab in database.m_items)
+                    if (prefab != null && prefab.TryGetComponent<ItemDrop>(out var drop) && drop.m_itemData?.m_shared?.m_name is string name && !names.ContainsKey(name))
+                        names[name] = prefab.name;
+                builtFrom = database;
+                builtCount = database.m_items.Count;
+            }
+            __result = names.TryGetValue(sharedName, out var found) ? found : sharedName;
+            return false;
+        }
+    }
 }
