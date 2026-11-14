@@ -112,7 +112,7 @@ namespace WorldPerformance
                     Current.Add(new KeyValuePair<Vector3, NavMeshLinkInstance>(point, kept));
                     continue;
                 }
-                var added = NavMesh.AddLink(new NavMeshLinkData
+                var added = PathfindingRecords.Add(new NavMeshLinkData
                 {
                     startPosition = point - across * 0.1f, endPosition = point + across * 0.1f, width = step,
                     costModifier = __instance.m_linkCost, bidirectional = true, agentTypeID = agent, area = 2,
@@ -189,6 +189,16 @@ namespace WorldPerformance
             }
         }
 
+        // Valheim 1.0.21: UpdateAsyncBuild adds a finished first build's mesh with NavMesh.AddNavMeshData.
+        [HarmonyTranspiler, HarmonyPatch("UpdateAsyncBuild")]
+        private static IEnumerable<CodeInstruction> AddMesh(IEnumerable<CodeInstruction> instructions) =>
+            Transpilers.CallInstead(instructions, instruction => instruction.Calls(AccessTools.Method(typeof(NavMesh), nameof(NavMesh.AddNavMeshData), new[] { typeof(NavMeshData) })),
+                AccessTools.Method(typeof(PathfindingRecords), nameof(PathfindingRecords.AddMesh)), 1, "Pathfinding.UpdateAsyncBuild no longer adds one mesh");
+
+        // Valheim 1.0.21: OnDestroy removes every tile's mesh natively when the world unloads.
+        [HarmonyPrefix, HarmonyPatch("OnDestroy")]
+        private static void Unloaded() => PathfindingRecords.Forget();
+
         // Valheim 1.0.15: DestroyQueuedNavmeshData removes a fortieth of the queued links, or up to 25 within a millisecond,
         // and only when no link is queued, one queued tile. The same link removal now runs, then one tile whose links are gone.
         [HarmonyPrefix, HarmonyPatch("DestroyQueuedNavmeshData")]
@@ -201,7 +211,7 @@ namespace WorldPerformance
                 int minimum = links.Count / 40, removed = 0;
                 while (links.Count > 0 && (removed < minimum || removed < 25 && Stopwatch.GetTimestamp() - started < budget))
                 {
-                    NavMesh.RemoveLink(links.Dequeue());
+                    PathfindingRecords.Remove(links.Dequeue());
                     removed++;
                 }
                 removedLinks += removed;
@@ -211,7 +221,7 @@ namespace WorldPerformance
             // TimeoutTiles queues each mesh with its entry; a mesh queued some other way would go first, without one.
             bool paired = tiles.Count <= Expired.Count;
             if (tiles.Count == 0 || paired && Expired.Peek().Key > removedLinks) return false;
-            NavMesh.RemoveNavMeshData(tiles.Dequeue());
+            PathfindingRecords.RemoveMesh(tiles.Dequeue());
             if (paired)
             {
                 var data = Expired.Dequeue().Value;
