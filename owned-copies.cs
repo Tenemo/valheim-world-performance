@@ -9,9 +9,9 @@ namespace WorldPerformance
 {
     // Some objects make their own copy of a material or mesh and never destroy it, so every copy outlives its object until
     // the hourly asset unload: the combined mesh of each mineable rock, the body material VisEquipment reads on each
-    // humanoid, the materials of each placement ghost and of each piece or creature with a colour variation, and with Star Level System
-    // the coloured copy of each creature's body material. Each copy now goes with the networked object that made it, and a
-    // placement ghost's with the ghost. A copy
+    // humanoid, the materials of each placement ghost and of each piece or creature with a colour variation, the mesh of each
+    // weapon's swing trail, and with Star Level System the coloured copy of each creature's body material. Each copy now goes
+    // with the networked object that made it, a placement ghost's with the ghost and a trail's with its weapon. A copy
     // several objects hold goes with the last of them, and nothing loaded from the game's files is ever destroyed: those
     // have positive instance ids, copies made while playing negative ones.
     internal static class OwnedCopies
@@ -24,6 +24,7 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<MineRock5, MeshFilter> rockFilter = AccessTools.FieldRefAccess<MineRock5, MeshFilter>("m_meshFilter");
         private static readonly AccessTools.FieldRef<Player, GameObject> ghostOf = AccessTools.FieldRefAccess<Player, GameObject>("m_placementGhost");
         private static readonly AccessTools.FieldRef<MaterialVariation, Renderer> variationRenderer = AccessTools.FieldRefAccess<MaterialVariation, Renderer>("m_renderer");
+        private static readonly AccessTools.FieldRef<MeleeWeaponTrail, Mesh> trailMesh = AccessTools.FieldRefAccess<MeleeWeaponTrail, Mesh>("m_trailMesh");
         private static List<Material> made;
         // The colour variation running now, whose renderer's material getter copies are its own.
         private static MaterialVariation variation;
@@ -52,6 +53,8 @@ namespace WorldPerformance
             // A placement ghost copies each of its materials; exactly the copies made while it is set up are its own.
             Patch(typeof(Player), "SetupPlacementGhost", nameof(BeforeGhost), nameof(OwnGhostMaterials));
             harmony.Patch(AccessTools.Constructor(typeof(Material), new[] { typeof(Material) }), postfix: Handler(nameof(Made)));
+            // A swing trail makes its mesh as it starts and destroys only the trail object drawing it.
+            Patch(typeof(MeleeWeaponTrail), "Start", null, nameof(OwnTrailMesh));
             harmony.Defer(() => Ready = true, () => Ready = false);
         }
 
@@ -149,16 +152,26 @@ namespace WorldPerformance
                 foreach (var material in renderer.sharedMaterials) if (material) drawn.Add(material);
             copies.RemoveAll(copy => !copy || copy.GetInstanceID() >= 0 || !drawn.Contains(copy));
             if (copies.Count == 0) return;
-            ghost.AddComponent<GhostCopies>().copies = copies;
+            ghost.AddComponent<HeldCopies>().copies = new List<Object>(copies);
             Owned += copies.Count;
         }
 
-        internal static IReadOnlyList<Material> GhostCopiesOf(GameObject ghost) =>
-            ghost && ghost.TryGetComponent<GhostCopies>(out var held) ? held.copies : (IReadOnlyList<Material>)Array.Empty<Material>();
-
-        private sealed class GhostCopies : MonoBehaviour
+        // The trail keeps drawing into its mesh while its weapon exists, so the mesh goes with the weapon's object.
+        private static void OwnTrailMesh(MeleeWeaponTrail __instance)
         {
-            internal List<Material> copies;
+            var mesh = trailMesh(__instance);
+            if (!Releasing || !mesh || mesh.GetInstanceID() >= 0) return;
+            __instance.gameObject.AddComponent<HeldCopies>().copies = new List<Object> { mesh };
+            Owned++;
+        }
+
+        internal static IReadOnlyList<Object> HeldCopiesOf(GameObject holder) =>
+            holder && holder.TryGetComponent<HeldCopies>(out var held) ? held.copies : (IReadOnlyList<Object>)Array.Empty<Object>();
+
+        // Copies an object without a networked view holds, destroyed with it.
+        private sealed class HeldCopies : MonoBehaviour
+        {
+            internal List<Object> copies;
 
             private void OnDestroy()
             {
