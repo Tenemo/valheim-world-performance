@@ -157,6 +157,7 @@ namespace WorldPerformance
                 Optional(typeof(SavedItemCopies), patches => SavedItemCopies.Initialize(patches, Plugin.Log));
                 Optional(typeof(OwnedCopies), OwnedCopies.Initialize);
                 Optional(typeof(ColoredCreatureCopies), patches => ColoredCreatureCopies.Initialize(patches, Plugin.Log));
+                Optional(typeof(FloatingWaterCache), FloatingWaterCache.Initialize);
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
             }
