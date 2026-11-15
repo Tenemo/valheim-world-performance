@@ -71,7 +71,9 @@ namespace WorldPerformance
         private static readonly Dictionary<int, (int agent, float x0, float z0, float x1, float z1)> meshes = new Dictionary<int, (int, float, float, float, float)>();
         // The records the chain holds while a mesh is added or removed, their next records and salts before, and the head.
         internal static readonly List<int> Presented = new List<int>();
-        private static int[] nexts = new int[0], salts = new int[0], marks = new int[0];
+        private static int[] nexts = new int[0], salts = new int[0], marks = new int[0], order = new int[0];
+        // The records the engine added while a mesh was added or removed, kept for the next mesh.
+        private static readonly List<int> added = new List<int>();
         private static long[] keys = new long[0];
         private static int mark, presentedHead;
         private static bool[] linked = new bool[0];
@@ -250,12 +252,14 @@ namespace WorldPerformance
                     }
                 }
             int count = Presented.Count;
-            if (keys.Length < count) { keys = new long[count * 2]; nexts = new int[count * 2]; salts = new int[count * 2]; }
-            for (int index = 0; index < count; index++) keys[index] = -place[Presented[index]];
-            var sorted = Presented.ToArray();
-            Array.Sort(keys, sorted, 0, count);
-            Presented.Clear();
-            Presented.AddRange(sorted);
+            if (keys.Length < count) { keys = new long[count * 2]; nexts = new int[count * 2]; salts = new int[count * 2]; order = new int[count * 2]; }
+            for (int index = 0; index < count; index++)
+            {
+                keys[index] = -place[Presented[index]];
+                order[index] = Presented[index];
+            }
+            Array.Sort(keys, order, 0, count);
+            for (int index = 0; index < count; index++) Presented[index] = order[index];
             for (int index = 0; index < count; index++)
             {
                 int slot = Presented[index];
@@ -275,7 +279,7 @@ namespace WorldPerformance
         private static void Restore(byte* navMesh)
         {
             int head = *(int*)(navMesh + LiveHead), changes = *(int*)(navMesh + Changes), count = Presented.Count;
-            var added = new List<int>();
+            added.Clear();
             if (changes != indexedChanges)
                 for (int slot = head; slot != -1 && marks[slot] != mark && added.Count <= count + 1024; slot = *NextOf(navMesh, slot)) added.Add(slot);
             for (int index = 0; index < count; index++)
