@@ -277,6 +277,7 @@ namespace WorldPerformance
             // the whole mesh's indices and Total the buffer's.
             internal int[] IndexFirst = Array.Empty<int>(), IndexCount = Array.Empty<int>(), Order = Array.Empty<int>();
             internal int SpanFirst, SpanEnd = -1, Indices, Total, DrawnFirst, Capacity;
+            internal bool SkyHidden;
             // The index buffer's raw view for the compaction kernel, the slots its drawn region holds in two words, and the
             // runs of a queued compaction.
             internal GraphicsBuffer IndexBuffer;
@@ -1573,6 +1574,7 @@ namespace WorldPerformance
                         foreach (var batch in cell.Batches)
                         {
                             if (!batch.Mesh || !batch.Renderer || !batch.Bounds.Intersects(box) || !SkyHides(batch, true)) continue;
+                            batch.SkyHidden = true;
                             skyBatches.Add(batch);
                             if ((skyMask & 1 << batch.Key.Layer) == 0 || !SkyDrawn(batch, __instance.m_depthShader)) continue;
                             UploadSky(batch);
@@ -1590,7 +1592,8 @@ namespace WorldPerformance
                 try
                 {
                     skyCommands?.Clear();
-                    foreach (var batch in skyBatches) SkyHides(batch, false);
+                    // A flush during the render may have changed what a mesh draws, so its renderers follow its drawn range again.
+                    foreach (var batch in skyBatches) { batch.SkyHidden = false; SkyHides(batch, false); ShowDrawn(batch); }
                 }
                 catch (Exception error) { Fail(error); }
                 finally { skyBatches.Clear(); }
@@ -1603,9 +1606,8 @@ namespace WorldPerformance
         {
             bool seen = (skyMask & 1 << batch.Key.Layer) != 0, twin = batch.Twin && (skyMask & 1 << TwinLayerOf(batch.Key.Layer)) != 0, ranges = (skyMask & RangeLayers) != 0;
             if (!seen && !twin && !ranges) return false;
-            bool nothing = !hide && DrawsNothing(batch);
-            if (seen && batch.Renderer) batch.Renderer.forceRenderingOff = hide || nothing;
-            if (twin) batch.Twin.forceRenderingOff = hide || nothing;
+            if (seen && batch.Renderer) batch.Renderer.forceRenderingOff = hide;
+            if (twin) batch.Twin.forceRenderingOff = hide;
             if (ranges) foreach (var range in batch.Lights) if (range.Renderer) range.Renderer.forceRenderingOff = hide;
             return true;
         }
@@ -1926,8 +1928,10 @@ namespace WorldPerformance
 
         private static bool DrawsNothing(Batch batch) => SkipEmptyDraws && batch.SpanEnd >= 0 && batch.SpanEnd <= batch.SpanFirst;
 
+        // A mesh the sky depth render switched off stays off through any flush that render triggers; its end shows it again.
         private static void ShowDrawn(Batch batch)
         {
+            if (batch.SkyHidden) return;
             bool off = DrawsNothing(batch);
             if (batch.Renderer && batch.Renderer.forceRenderingOff != off) batch.Renderer.forceRenderingOff = off;
             if (batch.Twin && batch.Twin.forceRenderingOff != off) batch.Twin.forceRenderingOff = off;
