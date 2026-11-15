@@ -62,9 +62,10 @@ namespace WorldPerformance
             if (character.m_nViewOverride) { update(character); return false; }
             foreach (var prefix in prefixes) prefix(character);
             if (character.HaveRider() || !IsSitting(character)) { Standing++; return false; }
-            // The rest of TameSitSystem.Update for a sitting creature.
+            // The rest of TameSitSystem.Update for a sitting creature; the AI is the creature's only MonsterAI, which the mod
+            // looks up again.
             Sitting++;
-            var monster = character.GetComponent<MonsterAI>();
+            var monster = ai;
             if ((bool)monster && (bool)monster.GetFollowTarget())
             {
                 monster.SetFollowTarget(null);
