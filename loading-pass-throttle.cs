@@ -27,7 +27,7 @@ namespace WorldPerformance
         private static bool Prefix()
         {
             if (ZNet.instance == null || ZNet.instance.IsDedicated() || ZoneSystem.instance == null || ZDOMan.instance == null) return true;
-            if (zoneSystem != ZoneSystem.instance)
+            if (!ReferenceEquals(zoneSystem, ZoneSystem.instance))
             {
                 zoneSystem = ZoneSystem.instance;
                 zones = (ICollection)AccessTools.Field(typeof(ZoneSystem), "m_zones").GetValue(zoneSystem);

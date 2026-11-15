@@ -18,7 +18,7 @@ namespace WorldPerformance
             var components = ActiveChildren<T>(root);
             int count = 0;
             foreach (var component in components)
-                if (component.gameObject != root) components[count++] = component;
+                if (!ReferenceEquals(component.gameObject, root)) components[count++] = component;
             if (count != components.Length) Array.Resize(ref components, count);
             return components;
         }

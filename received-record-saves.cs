@@ -45,7 +45,7 @@ namespace WorldPerformance
         // through their revision.
         private static void Moving(ZDO __instance, Vector3 __0)
         {
-            if (__instance.Persistent && !(__instance.GetPosition() == __0) && !__instance.IsOwner() && Server) Mark(__instance);
+            if (Server && __instance.Persistent && !(__instance.GetPosition() == __0) && !__instance.IsOwner()) Mark(__instance);
         }
 
         private static void Reading(ZDO __instance, out bool __state)
