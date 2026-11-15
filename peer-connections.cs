@@ -20,7 +20,8 @@ namespace WorldPerformance
         private static AccessTools.FieldRef<object, ZNetPeer> peerOf;
         private static FieldInfo peerList;
         private static readonly Dictionary<uint, Reading> readings = new Dictionary<uint, Reading>();
-        private static readonly Dictionary<Type, FieldInfo[]> wrappers = new Dictionary<Type, FieldInfo[]>();
+        // Each wrapper type's socket fields, read through field references made once per type rather than by reflection.
+        private static readonly Dictionary<Type, Func<object, ISocket>[]> wrappers = new Dictionary<Type, Func<object, ISocket>[]>();
 
         private struct Reading
         {
@@ -65,10 +66,17 @@ namespace WorldPerformance
             var type = socket.GetType();
             if (!wrappers.TryGetValue(type, out var fields))
                 wrappers[type] = fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
-                    .Where(field => typeof(ISocket).IsAssignableFrom(field.FieldType)).ToArray();
+                    .Where(field => typeof(ISocket).IsAssignableFrom(field.FieldType)).Select(Reader).ToArray();
             foreach (var field in fields)
-                if (field.GetValue(socket) is ISocket wrapped && !ReferenceEquals(wrapped, socket)) return wrapped;
+                if (field(socket) is ISocket wrapped && !ReferenceEquals(wrapped, socket)) return wrapped;
             return null;
+        }
+
+        private static Func<object, ISocket> Reader(FieldInfo field)
+        {
+            if (field.FieldType.IsValueType) return owner => field.GetValue(owner) as ISocket;
+            var read = AccessTools.FieldRefAccess<object, ISocket>(field);
+            return owner => read(owner);
         }
 
         internal static bool TryStatus(ZNetPeer peer, out SteamNetConnectionRealTimeStatus_t status) => TryStatus(SteamSocket(peer), out status);
