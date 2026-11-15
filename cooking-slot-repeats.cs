@@ -67,7 +67,7 @@ namespace WorldPerformance
             }
             else
             {
-                if (models != 1 || holder.GetChild(0).name != item) return Refresh();
+                if (models != 1) return Refresh();
                 cooking = fireLit && status != Burnt;
                 burnt = fireLit && status == Burnt;
                 done = fireLit && status == Done;
@@ -77,6 +77,8 @@ namespace WorldPerformance
             if (station.m_burntPS.Length != 0 && station.m_burntPS[slot].emission.enabled != burnt) return Refresh();
             if (station.m_donePS.Length != 0 && station.m_donePS[slot].emission.enabled != done) return Refresh();
             if (sounds(station)[slot].mute != mute) return Refresh();
+            // Reading the model's name makes a new string, so it is compared last.
+            if (item != "" && holder.GetChild(0).name != item) return Refresh();
             Skipped++;
             return true;
         }
