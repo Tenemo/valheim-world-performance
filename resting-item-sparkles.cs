@@ -22,6 +22,8 @@ namespace WorldPerformance
             internal ParticleSystem System;
             internal Rigidbody Body;
             internal ZNetView View;
+            // The item's transform, which a component keeps for life.
+            internal Transform Place;
             internal ParticleSystemCullingMode Native;
             internal float Formed;
             internal uint Revision;
@@ -101,7 +103,6 @@ namespace WorldPerformance
             var body = view.GetComponent<Rigidbody>();
             if (!body) return;
             int hash = zdo.GetPrefab();
-            view.GetComponentsInChildren(true, systems);
             if (!prefabs.TryGetValue(hash, out var prefab))
             {
                 var source = ZNetScene.instance ? ZNetScene.instance.GetPrefab(hash) : null;
@@ -115,12 +116,16 @@ namespace WorldPerformance
                             if (system.subEmitters.GetSubEmitterSystem(index) is ParticleSystem target) targets.Add(target);
                 prefabs[hash] = prefab = (prefabSystems.Count, source ? Enumerable.Range(0, prefabSystems.Count).Where(index => !targets.Contains(prefabSystems[index]) && Exclusion(prefabSystems[index]) == null).ToArray() : new int[0]);
             }
-            // A hierarchy that differs from its prefab keeps native effects.
-            if (prefab.eligible.Length == 0 || systems.Count != prefab.systems) return;
+            // Most items' prefabs have no eligible sparkle, which needs no look at the item's own systems. A hierarchy that
+            // differs from its prefab keeps native effects.
+            if (prefab.eligible.Length == 0) return;
+            view.GetComponentsInChildren(true, systems);
+            if (systems.Count != prefab.systems) return;
+            var place = view.transform;
             foreach (int index in prefab.eligible)
             {
                 var system = systems[index];
-                entries.Add(new Entry { System = system, Body = body, View = view, Native = system.main.cullingMode, Formed = Time.time + FormingSeconds(system.main) });
+                entries.Add(new Entry { System = system, Body = body, View = view, Place = place, Native = system.main.cullingMode, Formed = Time.time + FormingSeconds(system.main) });
             }
         }
 
@@ -165,7 +170,7 @@ namespace WorldPerformance
                     }
                     bool rest = Pausing && now >= entry.Formed && (zdo.IsOwner()
                         ? entry.Body.IsSleeping() && !entry.Body.isKinematic
-                        : zdo.DataRevision == entry.Revision && (entry.View.transform.position - zdo.GetPosition()).sqrMagnitude < 1e-4f);
+                        : zdo.DataRevision == entry.Revision && (entry.Place.position - zdo.GetPosition()).sqrMagnitude < 1e-4f);
                     entry.Revision = zdo.DataRevision;
                     if (rest != entry.Paused)
                     {
