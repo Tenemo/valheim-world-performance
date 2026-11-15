@@ -1603,8 +1603,9 @@ namespace WorldPerformance
         {
             bool seen = (skyMask & 1 << batch.Key.Layer) != 0, twin = batch.Twin && (skyMask & 1 << TwinLayerOf(batch.Key.Layer)) != 0, ranges = (skyMask & RangeLayers) != 0;
             if (!seen && !twin && !ranges) return false;
-            if (seen && batch.Renderer) batch.Renderer.forceRenderingOff = hide;
-            if (twin) batch.Twin.forceRenderingOff = hide;
+            bool nothing = !hide && DrawsNothing(batch);
+            if (seen && batch.Renderer) batch.Renderer.forceRenderingOff = hide || nothing;
+            if (twin) batch.Twin.forceRenderingOff = hide || nothing;
             if (ranges) foreach (var range in batch.Lights) if (range.Renderer) range.Renderer.forceRenderingOff = hide;
             return true;
         }
@@ -1914,6 +1915,28 @@ namespace WorldPerformance
             batch.SpanFirst = first;
             batch.SpanEnd = end;
             batch.Mesh.SetSubMesh(0, new SubMeshDescriptor(first, end - first) { firstVertex = 0, vertexCount = batch.Mesh.vertexCount, bounds = batch.Bounds }, quiet);
+            ShowDrawn(batch);
+        }
+
+        // About half the merged meshes draw nothing at a time, their slots all at levels drawn by other meshes or natively, yet
+        // the cameras and shadow passes still culled and submitted each of them. A mesh whose drawn range is empty is switched
+        // off until it holds indices again; it drew nothing, so every image stays the same. The isolated client can turn this
+        // off to compare.
+        internal static bool SkipEmptyDraws = true;
+
+        private static bool DrawsNothing(Batch batch) => SkipEmptyDraws && batch.SpanEnd >= 0 && batch.SpanEnd <= batch.SpanFirst;
+
+        private static void ShowDrawn(Batch batch)
+        {
+            bool off = DrawsNothing(batch);
+            if (batch.Renderer && batch.Renderer.forceRenderingOff != off) batch.Renderer.forceRenderingOff = off;
+            if (batch.Twin && batch.Twin.forceRenderingOff != off) batch.Twin.forceRenderingOff = off;
+        }
+
+        internal static void SetSkipEmptyDraws(bool skip)
+        {
+            SkipEmptyDraws = skip;
+            foreach (var cell in cells.Values) foreach (var batch in cell.Batches) if (batch.Mesh) ShowDrawn(batch);
         }
 
         // Fills each queued mesh's drawn region with the indices of its slots drawing now, in their order, and draws that
@@ -2866,6 +2889,7 @@ namespace WorldPerformance
                 UploadTwin(batch, 0, SlotLimit - 1);
             }
             Drawn(batch);
+            ShowDrawn(batch);
             batch.Appearances?.SetData(batch.AppearanceData);
             batch.TransformFrom = batch.AppearanceFrom = int.MaxValue;
             batch.TransformTo = batch.AppearanceTo = -1;
