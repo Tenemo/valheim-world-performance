@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Large bases take a few hundred fewer draw calls and up to 1.9 ms less render-thread time a frame: merged building and scenery meshes with nothing to draw at the moment are skipped.
+
 ## 1.0.2
 
 - Long sessions no longer pile up memory: the material and mesh copies that rocks, creatures, coloured pieces, weapon swing trails and Star Level System's creature colours make now go with them, and water and areas you have left are let go, instead of all waiting for the hourly cleanup.
