@@ -19,6 +19,8 @@ namespace WorldPerformance
         private sealed class Writing
         {
             internal Canvas Canvas;
+            // The canvas's transform, which a component keeps for life.
+            internal Transform Place;
             internal TMP_Text Text;
             // Switched off here; only those are switched on again.
             internal bool Hidden;
@@ -79,7 +81,7 @@ namespace WorldPerformance
             var text = __instance.m_textWidget;
             var canvas = text ? text.GetComponentInParent<Canvas>(true) : null;
             if (!canvas || canvas.renderMode != RenderMode.WorldSpace) return;
-            writings.Add(new Writing { Canvas = canvas, Text = text });
+            writings.Add(new Writing { Canvas = canvas, Place = canvas.transform, Text = text });
         }
 
         // The writing whose sign is the given one: whether it is registered and whether this feature has switched it off.
@@ -108,7 +110,7 @@ namespace WorldPerformance
                         writings.RemoveAt(writings.Count - 1);
                         continue;
                     }
-                    if ((canvas.transform.position - eye).sqrMagnitude > Reach * Reach)
+                    if ((writing.Place.position - eye).sqrMagnitude > Reach * Reach)
                     {
                         if (!writing.Hidden && canvas.enabled)
                         {
