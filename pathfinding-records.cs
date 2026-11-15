@@ -195,8 +195,10 @@ namespace WorldPerformance
         {
             var area = Area(data);
             var navMesh = area.HasValue ? Present(area.Value) : null;
-            var instance = NavMesh.AddNavMeshData(data);
-            if (navMesh != null) Restore(navMesh);
+            NavMeshDataInstance instance;
+            // The full chain comes back even if the engine throws, so routes never stay on a shortened chain.
+            try { instance = NavMesh.AddNavMeshData(data); }
+            finally { if (navMesh != null) Restore(navMesh); }
             if (area.HasValue && instance.valid) meshes[MeshHandle(ref instance)] = area.Value;
             return instance;
         }
@@ -210,8 +212,8 @@ namespace WorldPerformance
             int handle = MeshHandle(ref instance);
             var navMesh = meshes.TryGetValue(handle, out var area) ? Present(area) : null;
             meshes.Remove(handle);
-            NavMesh.RemoveNavMeshData(instance);
-            if (navMesh != null) Restore(navMesh);
+            try { NavMesh.RemoveNavMeshData(instance); }
+            finally { if (navMesh != null) Restore(navMesh); }
         }
 
         // The mesh's area with the margin within which the engine connects a record to its tiles: their overhang past the
