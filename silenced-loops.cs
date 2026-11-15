@@ -21,8 +21,8 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<AudioMan, List<ZSFX>> looping = AccessTools.FieldRefAccess<AudioMan, List<ZSFX>>("m_loopingSfx");
         private static readonly Action<ZSFX> updateReverb = AccessTools.MethodDelegate<Action<ZSFX>>(AccessTools.Method(typeof(ZSFX), "UpdateReverb"));
         // Sounds the limit has silenced that may still be fading out, checked after each frame's sound updates.
-        private static readonly HashSet<ZSFX> fading = new HashSet<ZSFX>();
-        private static readonly HashSet<ZSFX> paused = new HashSet<ZSFX>();
+        private static readonly HashSet<ZSFX> fading = new HashSet<ZSFX>(Identity<ZSFX>.Instance);
+        private static readonly HashSet<ZSFX> paused = new HashSet<ZSFX>(Identity<ZSFX>.Instance);
         private static readonly List<ZSFX> checking = new List<ZSFX>();
         private static bool pausing = true;
         internal static bool Running { get; private set; }

@@ -21,7 +21,7 @@ namespace WorldPerformance
         // A set with a list beside it, so each frame can look at a slice of it.
         private sealed class Kept<T> where T : UnityEngine.Object
         {
-            private readonly HashSet<T> members = new HashSet<T>();
+            private readonly HashSet<T> members = new HashSet<T>(Identity<T>.Instance);
             private readonly List<T> order = new List<T>();
             private int next;
             internal int Count => members.Count;
@@ -50,15 +50,15 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<CookingStation, ParticleSystem[]> slotSystems = AccessTools.FieldRefAccess<CookingStation, ParticleSystem[]>("m_ps");
         private static readonly AccessTools.FieldRef<CookingStation, AudioSource[]> slotSounds = AccessTools.FieldRefAccess<CookingStation, AudioSource[]>("m_as");
         // Systems switched off whose particles are still dying, systems paused here and muted sounds paused here.
-        private static readonly HashSet<ParticleSystem> fading = new HashSet<ParticleSystem>();
+        private static readonly HashSet<ParticleSystem> fading = new HashSet<ParticleSystem>(Identity<ParticleSystem>.Instance);
         private static readonly Kept<ParticleSystem> paused = new Kept<ParticleSystem>();
         private static readonly Kept<AudioSource> silent = new Kept<AudioSource>();
         private static readonly List<ParticleSystem> checking = new List<ParticleSystem>();
         private static readonly List<ParticleSystem> found = new List<ParticleSystem>();
         // Systems the weather's other systems start, which never play on their own.
-        private static readonly HashSet<ParticleSystem> started = new HashSet<ParticleSystem>();
+        private static readonly HashSet<ParticleSystem> started = new HashSet<ParticleSystem>(Identity<ParticleSystem>.Instance);
         // Renderers switched off here, by the paused system that holds them.
-        private static readonly Dictionary<ParticleSystem, ParticleSystemRenderer> hidden = new Dictionary<ParticleSystem, ParticleSystemRenderer>();
+        private static readonly Dictionary<ParticleSystem, ParticleSystemRenderer> hidden = new Dictionary<ParticleSystem, ParticleSystemRenderer>(Identity<ParticleSystem>.Instance);
         private static readonly Func<ParticleSystem, bool> switchedOn = system =>
         {
             if (!system) { hidden.Remove(system); return true; }
