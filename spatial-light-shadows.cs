@@ -33,6 +33,8 @@ namespace WorldPerformance
         private sealed class ShadowLight
         {
             internal Light Light;
+            // The light's transform, which a component keeps for life.
+            internal Transform Place;
             internal int Id, Layer, Excluded;
             // Where its slots were read from, how far, and its shadow maps' near plane, which serve until a destroyed light is
             // released.
@@ -194,7 +196,8 @@ namespace WorldPerformance
                 searched = 0;
                 step.Done(findCost, 1);
             }
-            while (Open())
+            // The budget is asked only while a light waits to be read or looked at.
+            while ((taking != null || searching != null) && Open())
             {
                 if (taking != null) ReadTaking();
                 else if (searching == null) break;
@@ -206,7 +209,7 @@ namespace WorldPerformance
         // Whether a light is still within the slack of where and how far its slots were read.
         private static bool Within(ShadowLight state)
         {
-            float range = state.Light.range, moved = (state.Light.transform.position - state.Position).magnitude;
+            float range = state.Light.range, moved = (state.Place.position - state.Position).magnitude;
             return moved + range <= state.Reach && range + 2f * LightSlack >= state.Reach;
         }
 
@@ -238,7 +241,8 @@ namespace WorldPerformance
                 return;
             }
             if (!Eligible(light) || lightStates.ContainsKey(light.GetInstanceID())) return;
-            var state = new ShadowLight { Light = light, Id = light.GetInstanceID(), Position = light.transform.position, Reach = light.range + LightSlack, NearPlane = light.shadowNearPlane };
+            var place = light.transform;
+            var state = new ShadowLight { Light = light, Place = place, Id = light.GetInstanceID(), Position = place.position, Reach = light.range + LightSlack, NearPlane = light.shadowNearPlane };
             float reach = state.Reach * state.Reach;
             foreach (var cell in cells.Values)
                 foreach (var batch in cell.Batches)
@@ -288,7 +292,7 @@ namespace WorldPerformance
         // false when it reaches none.
         private static bool Read(ShadowLight state)
         {
-            state.Position = state.Light.transform.position;
+            state.Position = state.Place.position;
             state.Reach = state.Light.range + LightSlack;
             state.NearPlane = state.Light.shadowNearPlane;
             float reach = state.Reach * state.Reach;
@@ -323,7 +327,8 @@ namespace WorldPerformance
                 if (slot < 64) low |= 1UL << slot;
                 else high |= 1UL << (slot - 64);
             }
-            var range = batch.Lights.Find(each => each.Light == state);
+            LightRange range = null;
+            foreach (var each in batch.Lights) if (each.Light == state) { range = each; break; }
             if (low == 0 && high == 0)
             {
                 if (range != null) { Forget(range); state.Ranges.Remove(range); }
@@ -439,7 +444,9 @@ namespace WorldPerformance
 
         private static void ReachAgain(ShadowLight state, Batch batch)
         {
-            if (batch.Bounds.SqrDistance(state.Position) <= state.Reach * state.Reach || batch.Lights.Exists(range => range.Light == state)) Reach(state, batch);
+            bool drawsFrom = batch.Bounds.SqrDistance(state.Position) <= state.Reach * state.Reach;
+            if (!drawsFrom) foreach (var range in batch.Lights) if (range.Light == state) { drawsFrom = true; break; }
+            if (drawsFrom) Reach(state, batch);
         }
 
         // A mesh going away leaves the lights that drew from it, and its ranges' renderers go with it.
