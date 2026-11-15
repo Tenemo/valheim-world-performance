@@ -12,8 +12,10 @@ namespace WorldPerformance
     {
         // The isolated test server's helper sets false to compare the native build.
         internal static bool Skipping = true;
+        // A process keeps its graphics device for its lifetime.
+        private static readonly bool drawing = SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
 
         [HarmonyPriority(Priority.First)]
-        private static bool Prefix() => !Skipping || SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
+        private static bool Prefix() => !Skipping || drawing;
     }
 }
