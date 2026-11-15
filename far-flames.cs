@@ -68,7 +68,10 @@ namespace WorldPerformance
         private static ParticleSystem.Particle[] buffer = new ParticleSystem.Particle[256];
         private static GameObject root, inactive;
         private static float farMinimum;
-        private static long advanceTicks, advanceFrames;
+        // The far band's share of Progression Fix's three-pixel minimum, a constant.
+        private static readonly float farBlend = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(80f, 160f, 150f));
+        // Set once Progression Fix is found; an installed plugin never leaves the list.
+        private static bool progressionFix;
         internal static bool Enabled { get; private set; }
         internal static string Failure { get; private set; }
 
@@ -78,7 +81,6 @@ namespace WorldPerformance
             if (!enabled) { Stop(); return; }
             Failure = null;
             Enabled = true;
-            advanceTicks = advanceFrames = 0;
             root = new GameObject("World Performance far flames");
             UnityEngine.Object.DontDestroyOnLoad(root);
             inactive = new GameObject("templates");
@@ -134,7 +136,6 @@ namespace WorldPerformance
         internal static void Update()
         {
             if (!Enabled) return;
-            long start = System.Diagnostics.Stopwatch.GetTimestamp();
             try { Advance(); }
             catch (Exception error)
             {
@@ -142,8 +143,6 @@ namespace WorldPerformance
                 Plugin.Log.LogError(error);
                 Stop();
             }
-            advanceTicks += System.Diagnostics.Stopwatch.GetTimestamp() - start;
-            advanceFrames++;
         }
 
         private static void Advance()
@@ -383,23 +382,21 @@ namespace WorldPerformance
         // takes its size at 150 m. Without Progression Fix the copies keep the game's own sizes.
         internal static void BeforeCamera(Camera camera)
         {
-            if (!Enabled || camera != Utils.GetMainCamera() || !Chainloader.PluginInfos.ContainsKey("valheim.epiclootprogressionfix")) return;
-            float minimum = 3f / Mathf.Max(1, camera.pixelHeight) * Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(80f, 160f, 150f));
+            if (!Enabled || camera != Utils.GetMainCamera()) return;
+            if (!progressionFix && !(progressionFix = Chainloader.PluginInfos.ContainsKey("valheim.epiclootprogressionfix"))) return;
+            float minimum = 3f / Mathf.Max(1, camera.pixelHeight) * farBlend;
             if (minimum == farMinimum) return;
             farMinimum = minimum;
             foreach (var pair in flames)
                 if (pair.Key.far && pair.Value.System) pair.Value.System.GetComponent<ParticleSystemRenderer>().minParticleSize = minimum;
         }
 
-        // The script's average is over the frames since the last report.
         internal static string Report()
         {
-            double script = advanceFrames > 0 ? advanceTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / advanceFrames : double.NaN;
-            advanceTicks = advanceFrames = 0;
             int shared = torches.Values.Count(torch => torch.Shared), hidden = torches.Values.Count(torch => torch.Hidden);
             return torches.Count + " torches, " + shared + " drawn by copies (" + hidden + " with their own systems stopped), " + flames.Count + " flame copies with " +
                 flames.Values.Sum(group => group.System ? group.System.particleCount : 0) + " particles, " + glows.Count + " glow copies with " +
-                glows.Values.Sum(group => group.Members.Count) + " glows, " + script.ToString("0.000") + " ms of script a frame";
+                glows.Values.Sum(group => group.Members.Count) + " glows";
         }
     }
 }
