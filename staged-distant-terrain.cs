@@ -20,9 +20,14 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<TerrainLod, Material> materialOf = AccessTools.FieldRefAccess<TerrainLod, Material>("m_material");
         private static readonly System.Reflection.FieldInfo stateOf = AccessTools.Field(typeof(TerrainLod), "m_heightmapState");
         private static readonly Type regionType = AccessTools.Inner(typeof(TerrainLod), "HeightmapWithOffset");
-        private static readonly System.Reflection.FieldInfo mapOf = AccessTools.Field(regionType, "m_heightmap");
-        private static readonly System.Reflection.FieldInfo offsetOf = AccessTools.Field(regionType, "m_offset");
+        private static readonly System.Reflection.FieldInfo mapField = AccessTools.Field(regionType, "m_heightmap");
+        private static readonly System.Reflection.FieldInfo offsetField = AccessTools.Field(regionType, "m_offset");
         private static readonly System.Reflection.FieldInfo regionStateOf = AccessTools.Field(regionType, "m_state");
+        // Made from the fields above once Start has found them.
+        private static AccessTools.FieldRef<object, Heightmap> mapOf;
+        private static AccessTools.FieldRef<object, Vector3> offsetOf;
+        // Each heightmap's renderer, which it finds or adds as it wakes and never replaces.
+        private static readonly AccessTools.FieldRef<Heightmap, MeshRenderer> rendererOf = AccessTools.FieldRefAccess<Heightmap, MeshRenderer>("m_meshRenderer");
         private static readonly object done = Enum.Parse(AccessTools.Inner(typeof(TerrainLod), "HeightmapState"), "Done");
         private static readonly Dictionary<TerrainLod, SpareRegions> stagings = new Dictionary<TerrainLod, SpareRegions>();
         internal static bool Running { get; private set; }
@@ -46,8 +51,10 @@ namespace WorldPerformance
             Running = true;
             try
             {
-                if (regionType == null || mapOf == null || offsetOf == null || regionStateOf == null || stateOf == null)
+                if (regionType == null || mapField == null || offsetField == null || regionStateOf == null || stateOf == null)
                     throw new InvalidOperationException("Valheim's distant terrain changed.");
+                mapOf = AccessTools.FieldRefAccess<object, Heightmap>(mapField);
+                offsetOf = AccessTools.FieldRefAccess<object, Vector3>(offsetField);
                 patches.Patch(AccessTools.Method(typeof(TerrainLod), "RebuildAllHeightmaps"), prefix: new HarmonyMethod(typeof(StagedDistantTerrain), nameof(Rebuild)));
                 patches.Patch(AccessTools.Method(typeof(TerrainLod), "ResetMeshes"), prefix: new HarmonyMethod(typeof(StagedDistantTerrain), nameof(Reset)));
             }
@@ -86,12 +93,12 @@ namespace WorldPerformance
                 staging.Point = point;
                 staging.Built = 0;
             }
-            while (staging.Spares.Count < regions.Count) staging.Spares.Add(Spare(__instance, (Heightmap)mapOf.GetValue(regions[staging.Spares.Count])));
+            while (staging.Spares.Count < regions.Count) staging.Spares.Add(Spare(__instance, mapOf(regions[staging.Spares.Count])));
             if (staging.Built < regions.Count)
             {
                 // TerrainLod.RebuildHeightmap on the spare: the region's place for the current point, then the game's full rebuild.
                 var spare = staging.Spares[staging.Built];
-                spare.transform.position = point + (Vector3)offsetOf.GetValue(regions[staging.Built]);
+                spare.transform.position = point + offsetOf(regions[staging.Built]);
                 spare.Regenerate();
                 staging.Built++;
                 Staged++;
@@ -100,11 +107,11 @@ namespace WorldPerformance
             for (int index = 0; index < regions.Count; index++)
             {
                 var region = regions[index];
-                var shown = (Heightmap)mapOf.GetValue(region);
+                var shown = mapOf(region);
                 var spare = staging.Spares[index];
                 Renderer(spare).forceRenderingOff = false;
                 Renderer(shown).forceRenderingOff = true;
-                mapOf.SetValue(region, spare);
+                mapOf(region) = spare;
                 staging.Spares[index] = shown;
                 regionStateOf.SetValue(region, done);
             }
@@ -114,7 +121,7 @@ namespace WorldPerformance
             return false;
         }
 
-        private static MeshRenderer Renderer(Heightmap map) => map.GetComponent<MeshRenderer>();
+        private static MeshRenderer Renderer(Heightmap map) => rendererOf(map);
 
         // TerrainLod.CreateMesh for a hidden region beside the shown one.
         private static Heightmap Spare(TerrainLod lod, Heightmap shown)
