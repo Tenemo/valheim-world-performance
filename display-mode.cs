@@ -79,12 +79,13 @@ namespace WorldPerformance
             return answer;
         }
 
-        // PresentManager.GetCurrentPresentResolution with the cached mode: the window's own size replaces the display's.
+        // PresentManager.GetCurrentPresentResolution with the cached mode: the window's own size replaces the display's, as
+        // Current has just read it.
         private static Resolution Present()
         {
             Resolution present = Current();
-            present.width = Screen.width;
-            present.height = Screen.height;
+            present.width = width;
+            present.height = height;
             return present;
         }
     }
