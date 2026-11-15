@@ -9,9 +9,10 @@ namespace WorldPerformance
 {
     // Some objects make their own copy of a material or mesh and never destroy it, so every copy outlives its object until
     // the hourly asset unload: the combined mesh of each mineable rock, the body material VisEquipment reads on each
-    // humanoid, the materials of each placement ghost and of each piece or creature with a colour variation, the mesh of each
-    // weapon's swing trail, and with Star Level System the coloured copy of each creature's body material. Each copy now goes
-    // with the networked object that made it, a placement ghost's with the ghost and a trail's with its weapon. A copy
+    // humanoid, the materials of each piece or creature with a colour variation, the mesh of each weapon's swing trail, and
+    // with Star Level System the coloured copy of each creature's body material. Each copy now goes with the networked object
+    // that made it, and a trail's with its weapon. A placement ghost's copies stay with the asset unload: the player keeps
+    // them after their ghost is gone, and PlantEasily's extra ghosts draw them too. A copy
     // several objects hold goes with the last of them, and nothing loaded from the game's files is ever destroyed: those
     // have positive instance ids, copies made while playing negative ones.
     internal static class OwnedCopies
@@ -22,10 +23,8 @@ namespace WorldPerformance
         // stays, so nothing is released with them.
         private static readonly HashSet<int> leaving = new HashSet<int>();
         private static readonly AccessTools.FieldRef<MineRock5, MeshFilter> rockFilter = AccessTools.FieldRefAccess<MineRock5, MeshFilter>("m_meshFilter");
-        private static readonly AccessTools.FieldRef<Player, GameObject> ghostOf = AccessTools.FieldRefAccess<Player, GameObject>("m_placementGhost");
         private static readonly AccessTools.FieldRef<MaterialVariation, Renderer> variationRenderer = AccessTools.FieldRefAccess<MaterialVariation, Renderer>("m_renderer");
         private static readonly AccessTools.FieldRef<MeleeWeaponTrail, Mesh> trailMesh = AccessTools.FieldRefAccess<MeleeWeaponTrail, Mesh>("m_trailMesh");
-        private static List<Material> made;
         // The colour variation running now, whose renderer's material getter copies are its own.
         private static MaterialVariation variation;
         // Off leaves new copies to the asset unload, as natively; the isolated client switches it for paired measurements.
@@ -50,9 +49,6 @@ namespace WorldPerformance
             foreach (var method in new[] { "CheckMaterial", "UpdateMaterial" })
                 harmony.Patch(AccessTools.Method(typeof(MaterialVariation), method), prefix: Handler(nameof(EnterVariation)), finalizer: Handler(nameof(LeaveVariation)));
             harmony.Patch(AccessTools.Method(typeof(Renderer), "GetMaterialArray"), prefix: Handler(nameof(BeforeMaterials)), postfix: Handler(nameof(OwnVariationCopies)));
-            // A placement ghost copies each of its materials; exactly the copies made while it is set up are its own.
-            Patch(typeof(Player), "SetupPlacementGhost", nameof(BeforeGhost), nameof(OwnGhostMaterials));
-            harmony.Patch(AccessTools.Constructor(typeof(Material), new[] { typeof(Material) }), postfix: Handler(nameof(Made)));
             // A swing trail makes its mesh as it starts and destroys only the trail object drawing it.
             Patch(typeof(MeleeWeaponTrail), "Start", null, nameof(OwnTrailMesh));
             harmony.Defer(() => Ready = true, () => Ready = false);
@@ -135,27 +131,6 @@ namespace WorldPerformance
                 if (material && Array.IndexOf(__state, material) < 0) Own(__instance, material);
         }
 
-        private static void BeforeGhost() => made = new List<Material>();
-
-        private static void Made(Material __instance) => made?.Add(__instance);
-
-        // The ghost's view removes itself, so the ghost holds its copies itself and they go with it.
-        private static void OwnGhostMaterials(Player __instance)
-        {
-            var copies = made;
-            made = null;
-            var ghost = ghostOf(__instance);
-            if (!Releasing || !ghost || copies == null || copies.Count == 0) return;
-            // Only copies the ghost draws are its own; anything else made during the setup is left to the asset unload.
-            var drawn = new HashSet<Material>();
-            foreach (var renderer in ghost.GetComponentsInChildren<Renderer>(true))
-                foreach (var material in renderer.sharedMaterials) if (material) drawn.Add(material);
-            copies.RemoveAll(copy => !copy || copy.GetInstanceID() >= 0 || !drawn.Contains(copy));
-            if (copies.Count == 0) return;
-            ghost.AddComponent<HeldCopies>().copies = new List<Object>(copies);
-            Owned += copies.Count;
-        }
-
         // The trail keeps drawing into its mesh while its weapon exists, so the mesh goes with the weapon's object.
         private static void OwnTrailMesh(MeleeWeaponTrail __instance)
         {
@@ -175,6 +150,8 @@ namespace WorldPerformance
 
             private void OnDestroy()
             {
+                // A clone of the holder starts without the list: the copies stay the original's.
+                if (copies == null) return;
                 foreach (var copy in copies)
                     if (copy) { Object.Destroy(copy); Released++; }
             }
