@@ -59,13 +59,20 @@ namespace WorldPerformance
         {
             if (!rebuilding && snapping && Holding && renderMeshOf(__instance) && !DeferredAssetUnload.NaturalPause())
             {
-                if (waiting.FindIndex(entry => entry.map == __instance) < 0) waiting.Add((__instance, Time.frameCount));
+                if (IndexOf(__instance) < 0) waiting.Add((__instance, Time.frameCount));
                 Held++;
                 return false;
             }
-            int index = waiting.FindIndex(entry => entry.map == __instance);
+            int index = IndexOf(__instance);
             if (index >= 0) waiting.RemoveAt(index);
             return true;
+        }
+
+        private static int IndexOf(Heightmap map)
+        {
+            for (int index = 0; index < waiting.Count; index++)
+                if (waiting[index].map == map) return index;
+            return -1;
         }
 
         // Rebuilds the first waiting render mesh held back in an earlier frame.
