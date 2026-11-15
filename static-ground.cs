@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -15,19 +16,32 @@ namespace WorldPerformance
     // mod keeps each answer by exact horizontal position and forgets them all whenever any of that happens, so these checks
     // get the native answers without casting the ray. The checks act only on an object above its ground or below it; when its
     // kept answer shows neither, they would read the same position, get the same answer and do nothing, so the mod skips them.
-    // Checks against solids stay native.
+    // Checks against solids stay native. Each check also reads the object's position, and reaching its transform through the
+    // engine was the largest part of a check: keeping it cut a check from 0.77 to 0.55 µs at Tenemo's base, where 4,248 of the
+    // 5,401 objects lie outside the active area and do nothing else. A component's transform never changes, so each object's
+    // is kept from its first check until it is destroyed.
     internal static class StaticGround
     {
+        private sealed class Identity : IEqualityComparer<StaticPhysics>
+        {
+            public bool Equals(StaticPhysics first, StaticPhysics second) => ReferenceEquals(first, second);
+            public int GetHashCode(StaticPhysics item) => RuntimeHelpers.GetHashCode(item);
+        }
+
         // Answers kept at most; more are forgotten together, which only means casting their rays again.
         private const int Capacity = 1 << 16;
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".static-ground");
         private static readonly Dictionary<Vector2, (bool hit, float height)> answers = new Dictionary<Vector2, (bool hit, float height)>();
+        private static readonly Dictionary<StaticPhysics, Transform> transforms = new Dictionary<StaticPhysics, Transform>(new Identity());
         private static ZoneSystem answering;
         private static readonly AccessTools.FieldRef<StaticPhysics, bool> falling = AccessTools.FieldRefAccess<StaticPhysics, bool>("m_falling");
         private static readonly AccessTools.FieldRef<StaticPhysics, float> waitedUntil = AccessTools.FieldRefAccess<StaticPhysics, float>("m_updateTime");
         internal static bool Running { get; private set; }
         // Off casts every ray, as natively, while answers stay kept; the isolated client switches it for paired measurements.
         internal static bool Caching { get; set; } = true;
+        // Off reaches each object's transform through the engine at every check, as before; the isolated client switches it for
+        // comparisons and paired measurements.
+        internal static bool KeepTransforms = true;
         internal static long Kept { get; private set; }
         internal static long Cast { get; private set; }
         internal static long Forgotten { get; private set; }
@@ -38,6 +52,8 @@ namespace WorldPerformance
             if (Running) return;
             Running = true;
             answers.Clear();
+            transforms.Clear();
+            patches.Patch(AccessTools.Method(typeof(SlowUpdate), nameof(SlowUpdate.OnDestroy)), postfix: new HarmonyMethod(typeof(StaticGround), nameof(Destroyed)));
             var forget = new HarmonyMethod(typeof(StaticGround), nameof(Forget));
             foreach (string method in new[] { "RebuildCollisionMesh", nameof(Heightmap.Clear), "OnEnable", "OnDisable", "OnDestroy" })
                 patches.Patch(AccessTools.Method(typeof(Heightmap), method), postfix: forget);
@@ -53,6 +69,7 @@ namespace WorldPerformance
             Running = false;
             patches.UnpatchSelf();
             answers.Clear();
+            transforms.Clear();
         }
 
         // The check's ground query becomes GroundHeight, which takes the same stack: the zone system, the position and the
@@ -78,11 +95,25 @@ namespace WorldPerformance
         private static bool ChecksAct(StaticPhysics __instance, float time, Vector2s referenceZone)
         {
             if (!Caching || __instance.m_checkSolids || falling(__instance) || !(time > waitedUntil(__instance))) return true;
-            var position = __instance.transform.position;
+            var position = TransformOf(__instance).position;
             if (ZNetScene.OutsideActiveArea(position, referenceZone)) return false;
             bool hit = GroundHeight(ZoneSystem.instance, position, out float ground);
             return __instance.m_fall && position.y > (hit ? ground : position.y) + 0.05f || __instance.m_pushUp && hit && position.y < ground - 0.05f;
         }
+
+        internal static Transform TransformOf(StaticPhysics item)
+        {
+            if (!KeepTransforms) return item.transform;
+            if (!transforms.TryGetValue(item, out var kept)) transforms[item] = kept = item.transform;
+            return kept;
+        }
+
+        private static void Destroyed(SlowUpdate __instance)
+        {
+            if (__instance is StaticPhysics item) transforms.Remove(item);
+        }
+
+        internal static int Transforms => transforms.Count;
 
         private static bool GroundHeight(ZoneSystem zones, Vector3 position, out float height)
         {
