@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2
+
+- Long sessions no longer pile up memory: the material and mesh copies that rocks, creatures, coloured pieces, weapon swing trails and Star Level System's creature colours make now go with them, and water and areas you have left are let go, instead of all waiting for the hourly cleanup.
+- With AzuCraftyBoxes and Epic Loot, the enchanting table opens in about 46 ms instead of 130 ms in a large base, and Convert Materials in about 25 ms instead of up to 300 ms.
+- Creatures' pathfinding upkeep in a large base takes about a third less time.
+
 ## 1.0.1
 
 - The mod page gives one short point per improvement, lists the long-session fixes, recommends TenemoPack and asks for problem reports in its Hexium threads.
