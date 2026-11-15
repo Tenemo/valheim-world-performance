@@ -81,12 +81,13 @@ namespace WorldPerformance
         internal static bool Resting(IWaterInteractable interactable, WaterVolume volume)
         {
             if (!Skipping || !(interactable is Floating item)) return false;
-            var rigidbody = body(item);
-            var collider = shape(item);
+            // Ownership first: it rules out the items other games own without reaching their bodies through the engine.
             var network = view(item);
             float stored = level(item);
-            if (!(stored > -10000f) || !rigidbody || !collider || rigidbody.isKinematic || !rigidbody.IsSleeping() || !network || !network.IsValid() || !network.IsOwner())
-                return false;
+            if (!(stored > -10000f) || !network || !network.IsValid() || !network.IsOwner()) return false;
+            var rigidbody = body(item);
+            var collider = shape(item);
+            if (!rigidbody || !collider || rigidbody.isKinematic || !rigidbody.IsSleeping()) return false;
             float highest = Mathf.Max(stored, HighestWave(volume)) + Margin;
             if (!(collider.bounds.min.y > highest) || !(rigidbody.worldCenterOfMass.y - item.m_waterLevelOffset > highest)) return false;
             Skipped++;
