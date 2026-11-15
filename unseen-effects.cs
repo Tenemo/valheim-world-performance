@@ -136,17 +136,20 @@ namespace WorldPerformance
         }
 
         // Network objects as they are created: streamed in, placed, spawned or dropped. The decision is cached per prefab, and
-        // the many prefabs without eligible effects cost one dictionary lookup.
+        // the many prefabs without eligible effects cost one dictionary lookup, which the registration time leaves out.
         private static void Created(ZNetView __instance)
         {
             if (!running) return;
-            long start = Stopwatch.GetTimestamp();
+            long start = 0;
             try
             {
                 var zdo = __instance.GetZDO();
                 if (zdo == null) return;
                 int hash = zdo.GetPrefab();
-                if (!prefabs.TryGetValue(hash, out var prefab))
+                bool known = prefabs.TryGetValue(hash, out var prefab);
+                if (known && prefab.Eligible.Length == 0) return;
+                start = Stopwatch.GetTimestamp();
+                if (!known)
                 {
                     var source = ZNetScene.instance ? ZNetScene.instance.GetPrefab(hash) : null;
                     if (!source) { Register(__instance.gameObject); return; }
@@ -160,11 +163,13 @@ namespace WorldPerformance
                 __instance.GetComponentsInChildren(true, systems);
                 // A hierarchy that already differs from its prefab is judged on its own.
                 if (systems.Count != prefab.Systems) { Register(__instance.gameObject); return; }
-                var eligible = prefab.Eligible.Select(index => systems[index]).ToArray();
+                // The eligible systems are taken before managing them, which adds a component to each.
+                var eligible = new ParticleSystem[prefab.Eligible.Length];
+                for (int index = 0; index < eligible.Length; index++) eligible[index] = systems[prefab.Eligible[index]];
                 foreach (var system in eligible) Manage(system);
             }
             catch (Exception error) { Fail(error); }
-            finally { registrationTicks += Stopwatch.GetTimestamp() - start; }
+            finally { if (start != 0) registrationTicks += Stopwatch.GetTimestamp() - start; }
         }
 
         // Effects spawned into world objects later: item stand visuals, location contents, dungeon rooms and effects some
