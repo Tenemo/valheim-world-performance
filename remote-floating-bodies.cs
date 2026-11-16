@@ -28,6 +28,8 @@ namespace WorldPerformance
             internal Rigidbody rigidbody;
             internal Floating floating;
             internal bool parked, parking;
+            // Its place in Parked while parked.
+            internal int parkedAt;
         }
 
         private static readonly Dictionary<ZSyncTransform, Body> Bodies = new Dictionary<ZSyncTransform, Body>();
@@ -73,11 +75,11 @@ namespace WorldPerformance
                 if (!Bodies.TryGetValue(__instance, out var state)) return;
                 Bodies.Remove(__instance);
                 if ((object)state.floating != null && Floaters.TryGetValue(state.floating, out var floater) && floater == state) Floaters.Remove(state.floating);
-                // The game's own removal found nothing in its list; the body leaves this one instead.
+                // The game's own removal found nothing in its list; the body leaves this one instead, its place taken by the last.
                 if (state.parked)
                 {
                     state.parked = false;
-                    Parked.Remove(state);
+                    Unpark(state.parkedAt);
                 }
                 state.parking = false;
                 if (___m_body) ___m_body.isKinematic = false;
@@ -261,6 +263,7 @@ namespace WorldPerformance
                 state.parking = false;
                 if (state.parked || !Bodies.TryGetValue(state.sync, out var current) || current != state) continue;
                 state.parked = true;
+                state.parkedAt = Parked.Count;
                 Parked.Add(state);
                 Parks++;
                 leaving.Add(state.sync);
@@ -276,12 +279,19 @@ namespace WorldPerformance
         private static void Return(Body state, int index)
         {
             state.parked = false;
-            int last = Parked.Count - 1;
-            Parked[index] = Parked[last];
-            Parked.RemoveAt(last);
+            Unpark(index);
             Returns++;
             ZSyncTransform.Instances.Add(state.sync);
             if (state.floating && state.floating.isActiveAndEnabled) Floating.Instances.Add(state.floating);
+        }
+
+        private static void Unpark(int index)
+        {
+            int last = Parked.Count - 1;
+            var moved = Parked[last];
+            Parked[index] = moved;
+            moved.parkedAt = index;
+            Parked.RemoveAt(last);
         }
     }
 }
