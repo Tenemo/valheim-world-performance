@@ -294,7 +294,7 @@ namespace WorldPerformance
             internal readonly Appearance[] AppearanceData = new Appearance[SlotLimit];
             internal int TransformFrom = int.MaxValue, TransformTo = -1, AppearanceFrom = int.MaxValue, AppearanceTo = -1, SkyFrom = int.MaxValue, SkyTo = -1;
             internal Build Build;
-            internal bool Dirty;
+            internal bool Dirty, Flushing;
         }
 
         private sealed class Build
@@ -633,6 +633,10 @@ namespace WorldPerformance
         private static readonly int slotCompactionId = Shader.PropertyToID("_SlotCompaction"), slotRunsId = Shader.PropertyToID("_SlotRuns"),
             mergedIndicesId = Shader.PropertyToID("_MergedIndices");
         private static bool flushPending, skyDepth, linear;
+        // The merged meshes with slots to upload in the next flush.
+        private static readonly List<Batch> flushing = new List<Batch>();
+        // The isolated client can turn this off to look through every merged mesh in a flush, as before, to compare.
+        internal static bool ListedFlush = true;
         // The main camera's detail settings, compared as read: a value computed from them may keep extra precision.
         private static float detailScale = float.NaN, detailBias = float.NaN, detailView = float.NaN;
         private static int detailMaximum = -1;
@@ -851,6 +855,8 @@ namespace WorldPerformance
                 for (int index = cell.Batches.Count - 1; index >= 0; index--) DestroyBatch(cell.Batches[index]);
             compactions.Clear();
             twins.Clear();
+            foreach (var batch in flushing) batch.Flushing = false;
+            flushing.Clear();
             skyPending.Clear();
             skyScanned = false;
             foreach (var member in Members()) if (member.Owned && !member.Away) ShowNative(member);
@@ -1517,6 +1523,7 @@ namespace WorldPerformance
                         slot.batch.AppearanceData[slot.slot] = AppearanceOf(member, slot.part);
                         slot.batch.AppearanceFrom = Math.Min(slot.batch.AppearanceFrom, slot.slot);
                         slot.batch.AppearanceTo = Math.Max(slot.batch.AppearanceTo, slot.slot);
+                        Flush(slot.batch);
                     }
                     flushPending = true;
                 }
@@ -2089,6 +2096,7 @@ namespace WorldPerformance
                 batch.TransformTo = Math.Max(batch.TransformTo, slot);
                 batch.AppearanceFrom = Math.Min(batch.AppearanceFrom, slot);
                 batch.AppearanceTo = Math.Max(batch.AppearanceTo, slot);
+                Flush(batch);
             }
             flushPending = true;
         }
@@ -2129,6 +2137,7 @@ namespace WorldPerformance
                 slot.batch.TransformData[slot.slot * 2 + 1] = default;
                 slot.batch.TransformFrom = Math.Min(slot.batch.TransformFrom, slot.slot);
                 slot.batch.TransformTo = Math.Max(slot.batch.TransformTo, slot.slot);
+                Flush(slot.batch);
                 SkySlot(slot.batch, slot.slot, member, slot.part, false);
                 flushPending = true;
             }
@@ -2203,25 +2212,38 @@ namespace WorldPerformance
                 if (!flushPending) return;
                 using (new Timed(Uploads))
                 {
-                    foreach (var cell in cells.Values)
-                        foreach (var batch in cell.Batches)
-                        {
-                            if (batch.TransformTo >= 0 && batch.Transforms != null)
-                            {
-                                batch.Transforms.SetData(batch.TransformData, batch.TransformFrom * 2, batch.TransformFrom * 2, (batch.TransformTo - batch.TransformFrom + 1) * 2);
-                                UploadTwin(batch, batch.TransformFrom, batch.TransformTo);
-                                Drawn(batch, batch.TransformFrom, batch.TransformTo);
-                            }
-                            if (batch.AppearanceTo >= 0 && batch.Appearances != null)
-                                batch.Appearances.SetData(batch.AppearanceData, batch.AppearanceFrom, batch.AppearanceFrom, batch.AppearanceTo - batch.AppearanceFrom + 1);
-                            batch.TransformFrom = batch.AppearanceFrom = int.MaxValue;
-                            batch.TransformTo = batch.AppearanceTo = -1;
-                        }
+                    if (ListedFlush) foreach (var batch in flushing) Upload(batch);
+                    else foreach (var cell in cells.Values) foreach (var batch in cell.Batches) Upload(batch);
+                    foreach (var batch in flushing) batch.Flushing = false;
+                    flushing.Clear();
                     if (compactions.Count > 0) Compact();
                 }
                 flushPending = false;
             }
             catch (Exception error) { Fail(error); }
+        }
+
+        // Queues a merged mesh whose slot ranges changed for the next flush.
+        private static void Flush(Batch batch)
+        {
+            if (batch.Flushing) return;
+            batch.Flushing = true;
+            flushing.Add(batch);
+        }
+
+        // Uploads a merged mesh's changed slots; a mesh destroyed since has no buffers left and uploads nothing.
+        private static void Upload(Batch batch)
+        {
+            if (batch.TransformTo >= 0 && batch.Transforms != null)
+            {
+                batch.Transforms.SetData(batch.TransformData, batch.TransformFrom * 2, batch.TransformFrom * 2, (batch.TransformTo - batch.TransformFrom + 1) * 2);
+                UploadTwin(batch, batch.TransformFrom, batch.TransformTo);
+                Drawn(batch, batch.TransformFrom, batch.TransformTo);
+            }
+            if (batch.AppearanceTo >= 0 && batch.Appearances != null)
+                batch.Appearances.SetData(batch.AppearanceData, batch.AppearanceFrom, batch.AppearanceFrom, batch.AppearanceTo - batch.AppearanceFrom + 1);
+            batch.TransformFrom = batch.AppearanceFrom = int.MaxValue;
+            batch.TransformTo = batch.AppearanceTo = -1;
         }
 
         // Every scenery slot lights from the ambient probe, as native renderers do in a world without light probes.
