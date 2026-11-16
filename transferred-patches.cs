@@ -32,6 +32,7 @@ namespace WorldPerformance
         internal const string Treadwell = "com.jstack424.treadwell";
         internal const string StarLevelSystem = "MidnightsFX.StarLevelSystem";
         internal const string Jotunn = "com.jotunn.jotunn";
+        internal const string Sailing = "org.bepinex.plugins.sailing";
         private static readonly Dictionary<string, string[]> Supported = new Dictionary<string, string[]>
         {
             { QuickStack, new[] { "1.4.16" } }, { DropThat, new[] { "3.1.7" } },
@@ -42,6 +43,7 @@ namespace WorldPerformance
             { FedoHud, new[] { "1.1.2" } }, { NoSmokeStayLit, new[] { "2.4.4" } }, { TameRidingOverhaul, new[] { "0.1.20" } },
             { Treadwell, new[] { "1.0.1" } }, { StarLevelSystem, new[] { "1.33.0" } },
             { Jotunn, new[] { "2.30.2" } },
+            { Sailing, new[] { "1.1.12" } },
         };
 
         internal static bool TryGet(string id, out PluginInfo plugin)
@@ -173,6 +175,7 @@ namespace WorldPerformance
                 Optional(typeof(InstanceCameraPosition), InstanceCameraPosition.Initialize);
                 Optional(typeof(InputCheckOrder), InputCheckOrder.Initialize);
                 Optional(typeof(JotunnButtonTwins), patches => JotunnButtonTwins.Initialize(patches, Plugin.Log));
+                Optional(typeof(SailingShipUser), patches => SailingShipUser.Initialize(patches, Plugin.Log));
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
