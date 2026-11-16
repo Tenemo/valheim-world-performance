@@ -12,7 +12,8 @@ namespace WorldPerformance
     // theirs now skip the roof cast; the cover comes from the same rays. A fire checking for wet weather needs the cover
     // only in strong wind and the roof only in rain when the wind has not already put it out, so each is cast only then.
     // Physics queries change nothing, so only the answers the callers read remain. A patch of another mod on the cover or
-    // roof checks, or on the fire's check, turns this off and fails mod-compatibility.
+    // roof checks, or on the fire's check, turns this off and fails mod-compatibility. Both are read when the player spawns,
+    // so a conflict shows even where no hive, windmill, wisp spawner or fire is loaded.
     internal static class CoverChecks
     {
         private static readonly AccessTools.FieldRef<Vector3[]> rays = AccessTools.StaticFieldRefAccess<Vector3[]>(AccessTools.Field(typeof(Cover), "m_coverRays"));
@@ -33,10 +34,27 @@ namespace WorldPerformance
                 harmony.Patch(caller, transpiler: transpiler);
             checkWet = AccessTools.Method(typeof(Fireplace), "CheckWet");
             harmony.Patch(checkWet, prefix: new HarmonyMethod(typeof(CoverChecks), nameof(CheckWet)));
+            harmony.Patch(AccessTools.Method(typeof(Player), nameof(Player.OnSpawned)), postfix: new HarmonyMethod(typeof(CoverChecks), nameof(Spawned)));
+        }
+
+        private static void Spawned(Player __instance)
+        {
+            if (__instance == Player.m_localPlayer && Ready()) FireReady();
         }
 
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions) =>
             Transpilers.CallInstead(instructions, instruction => instruction.Calls(cover), AccessTools.Method(typeof(CoverChecks), nameof(CoverOnly)), 1, "A cover check changed.");
+
+        private static bool FireReady()
+        {
+            if (fireReady == 0)
+            {
+                string problem = PatchSets.Unknown(checkWet);
+                fireReady = problem == null ? 1 : -1;
+                if (problem != null) Plugin.Fallback("CoverChecks unavailable: " + problem);
+            }
+            return fireReady > 0;
+        }
 
         private static bool Ready()
         {
@@ -70,14 +88,7 @@ namespace WorldPerformance
         // Fireplace.CheckWet, casting the cover rays only in strong wind and the roof sphere only when rain decides.
         private static bool CheckWet(Fireplace __instance)
         {
-            if (!Ready()) return true;
-            if (fireReady == 0)
-            {
-                string problem = PatchSets.Unknown(checkWet);
-                fireReady = problem == null ? 1 : -1;
-                if (problem != null) Plugin.Fallback("CoverChecks unavailable: " + problem);
-            }
-            if (fireReady < 0) return true;
+            if (!Ready() || !FireReady()) return true;
             wet(__instance) = false;
             bool windy = EnvMan.instance.GetWindIntensity() >= 0.8f;
             bool raining = EnvMan.IsWet();
