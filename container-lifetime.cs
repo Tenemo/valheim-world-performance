@@ -50,8 +50,12 @@ namespace WorldPerformance
             ContainerLifetime.Track(harmony, chest =>
             {
                 var chests = (List<Container>)list.GetValue(null);
-                int index = chests.FindIndex(entry => ReferenceEquals(entry, chest));
-                if (index >= 0) chests.RemoveAt(index);
+                for (int index = 0; index < chests.Count; index++)
+                    if (ReferenceEquals(chests[index], chest))
+                    {
+                        chests.RemoveAt(index);
+                        return;
+                    }
             });
         }
     }
