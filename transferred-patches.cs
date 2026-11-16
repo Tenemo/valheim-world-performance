@@ -119,7 +119,7 @@ namespace WorldPerformance
                     typeof(CookingSlotVisuals), typeof(PacedRemovals), typeof(PacedDungeonRooms),
                     typeof(TerrainSupportForwarders), typeof(BuildButtonSubscriptions), typeof(BuildButtonOrder), typeof(ClientMapCache),
                     typeof(ParallelBiomePoints), typeof(WorldGenerationCache), typeof(LoadingScreenZones), typeof(PlayerDepartures), typeof(ServerTerrainMeshes),
-                    typeof(DamageNumberFading), typeof(GhostDungeonRooms),
+                    typeof(DamageNumberFading), typeof(DamageNumberReuse), typeof(GhostDungeonRooms),
                     typeof(ConfigWatcherListings), typeof(PacedGrassRebuilds),
                     typeof(LoadingScreenPriority), typeof(ArrivalConfirmation),
                     typeof(AsyncLocationSpawns) })
