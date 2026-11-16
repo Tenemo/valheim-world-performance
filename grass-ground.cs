@@ -69,11 +69,11 @@ namespace WorldPerformance
             Running = false;
         }
 
-        // The collision mesh's vertices are read again at the next use.
+        // The collision mesh's vertices are read again at the next use, even within the frame the tile was last checked.
         private static void Rebuilt(Heightmap __instance)
         {
             foreach (var tile in tiles)
-                if (tile != null && ReferenceEquals(tile.Map, __instance)) tile.Vertices = null;
+                if (tile != null && ReferenceEquals(tile.Map, __instance)) { tile.Vertices = null; tile.CheckedFrame = -1; }
         }
 
         // A zone loaded again gets a new heightmap at the same place.
