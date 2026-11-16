@@ -22,8 +22,13 @@ namespace WorldPerformance
         // Each starting material's shared copy and the other way round, and each known volume's surface and starting material.
         private static readonly Dictionary<Material, Material> copies = new Dictionary<Material, Material>();
         private static readonly Dictionary<Material, Material> sources = new Dictionary<Material, Material>();
-        private static readonly Dictionary<WaterVolume, (MeshRenderer renderer, Material source)> surfaces = new Dictionary<WaterVolume, (MeshRenderer, Material)>();
-        private static int writtenFrame = -1;
+        private static readonly Dictionary<WaterVolume, (MeshRenderer renderer, Material source)> surfaces = new Dictionary<WaterVolume, (MeshRenderer, Material)>(Identity<WaterVolume>.Instance);
+        // Volumes enabled since they last shared, which share at their next update unless their setup has; every other volume
+        // updating is known without a lookup.
+        private static readonly HashSet<WaterVolume> enabled = new HashSet<WaterVolume>(Identity<WaterVolume>.Instance);
+        // Set as the game's volume updates start each frame, the only place it updates their materials, so the frame's first
+        // update writes the copies' time, as natively the first writes its own.
+        private static bool due;
         private static bool sharing = true;
         internal static bool Running { get; private set; }
         internal static int Surfaces => surfaces.Count;
@@ -46,10 +51,14 @@ namespace WorldPerformance
         {
             if (Running) return;
             Running = true;
-            writtenFrame = -1;
+            due = true;
             patches.Patch(setup, prefix: new HarmonyMethod(typeof(SharedWaterTime), nameof(SetUp)));
             patches.Patch(AccessTools.Method(typeof(WaterVolume), nameof(WaterVolume.UpdateMaterials)), prefix: new HarmonyMethod(typeof(SharedWaterTime), nameof(Write)));
+            patches.Patch(AccessTools.Method(typeof(WaterVolume), "OnEnable"), postfix: new HarmonyMethod(typeof(SharedWaterTime), nameof(Enabled)));
             patches.Patch(AccessTools.Method(typeof(WaterVolume), "OnDisable"), postfix: new HarmonyMethod(typeof(SharedWaterTime), nameof(Forget)));
+            patches.Patch(AccessTools.Method(typeof(MonoUpdaters), "Update"), prefix: new HarmonyMethod(typeof(SharedWaterTime), nameof(Updating)));
+            // Volumes enabled before a restart share at their next update too.
+            foreach (var volume in WaterVolume.Instances) if (volume && !surfaces.ContainsKey(volume)) enabled.Add(volume);
             if (sharing) Switch(true);
         }
 
@@ -87,16 +96,29 @@ namespace WorldPerformance
         private static bool Write(WaterVolume __instance)
         {
             if (!sharing) return true;
-            if (!surfaces.ContainsKey(__instance)) Share(__instance);
-            if (writtenFrame == Time.frameCount) return false;
-            writtenFrame = Time.frameCount;
+            // Only a volume enabled since it last shared can be unknown; one whose surface cannot share yet tries again.
+            if (enabled.Count > 0 && enabled.Contains(__instance))
+            {
+                if (!surfaces.ContainsKey(__instance)) Share(__instance);
+                if (surfaces.ContainsKey(__instance)) enabled.Remove(__instance);
+            }
+            if (!due) return false;
+            due = false;
             float now = time();
             foreach (var copy in copies.Values) copy.SetFloat(waterTime, now);
             return false;
         }
 
-        // A disabled or destroyed volume is set up again when it next updates.
-        private static void Forget(WaterVolume __instance) => surfaces.Remove(__instance);
+        private static void Updating() => due = true;
+
+        private static void Enabled(WaterVolume __instance) => enabled.Add(__instance);
+
+        // A disabled or destroyed volume is set up again when it next updates after being enabled.
+        private static void Forget(WaterVolume __instance)
+        {
+            surfaces.Remove(__instance);
+            enabled.Remove(__instance);
+        }
 
         private static Material SourceOf(Material material) => sources.TryGetValue(material, out var source) ? source : material;
 
