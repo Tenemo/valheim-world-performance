@@ -27,7 +27,7 @@ The only visible differences are small: crops and other small objects more than 
 - **The inventory is snappier.** The open inventory redraws only what changed, including Epic Loot's, BetterUI's and Quick Stack Store's markings.
 - **No more honey freezes.** Bases with many Better Beehives hives no longer freeze for a second or more every 20 minutes.
 - **Fewer memory cleanup hitches.** Memory cleanup runs less often and no longer freezes the game for seconds on a busy computer.
-- **Saves and cleanups don't interrupt play.** Automatic saves hitch for about 17 ms instead of 65, and the hourly asset cleanup waits for a loading screen or the menu.
+- **Saves and cleanups don't interrupt play.** Automatic saves hitch for about 17 ms instead of 65, and the hourly asset cleanup waits for a loading screen or the menu, as does unloading the ruins and dungeon rooms you've passed.
 - **No freezes from a busy disk.** Epic Loot's and Equipment and Quick Slots' file checks and saves no longer stall the game while the disk is busy.
 - **No freeze when AzuClock first appears.**
 - **New places appear without a stutter.** Ruins, dungeons, regrown grass and distant terrain build over a few frames instead of one long one, terrain builds in about half the time, and what you leave behind is cleared over about a second.

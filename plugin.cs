@@ -257,6 +257,7 @@ namespace WorldPerformance
             Guard(nameof(SharedWaterTime), SharedWaterTime.Start);
             Guard(nameof(MapDataPacking), MapDataPacking.Start);
             Guard(nameof(DeferredAssetUnload), DeferredAssetUnload.Start);
+            Guard(nameof(KeptStreamedAssets), KeptStreamedAssets.Start);
             Guard(nameof(SnappingRenderMeshes), SnappingRenderMeshes.Start);
             Guard(nameof(TerrainRebuilds), TerrainRebuilds.Start);
             Guard(nameof(GrassGround), GrassGround.Start);
@@ -277,7 +278,7 @@ namespace WorldPerformance
             Guard(nameof(BarsBehindCamera), BarsBehindCamera.Start);
             Guard(nameof(DistantSignWriting), DistantSignWriting.Start);
             Guard(nameof(IntroLogos), IntroLogos.Start);
-            Logger.LogInfo("World Performance loaded: unseen world effects pause, torch flames beyond 30 m come from shared copies of their systems, small objects beyond 60 m cast no sun shadows, the display mode is read twice a second, resting items skip wave heights, silenced looping sounds pause, particle systems stop naming meshes they never draw, resting objects keep their ground heights, the animators of resting doors pause, water volumes share their water time, saves reuse an unchanged packed map and pack a changed one on a worker, the hourly asset unload waits for a natural pause, ground snapping leaves terrain render meshes to the next frames, terrain rebuilds colour tiles from their corners once and bake their colliders on workers, the distant terrain builds its moved regions one a frame and shows them together, empty reference arrays space collections out, biome borders log no warning, key hints refresh only their own labels, health bars the hud would hide again behind the camera stay hidden, sign writing beyond 60 m is not drawn, the intro logos are skipped, creatures at rest sleep, reuse their ground rays and update every few steps, idle cooking and weather effects pause, containers skip reloading unchanged items, building keeps each nearby piece's snap points, idle vine segments stop updating, the mist emitter runs at most 10 times a second, packages write floats without garbage, network records are sent and read without temporary lists and delegates, active-area tests make no garbage and collision callbacks reuse their objects. The spatial building renderer and the later presentation wait start with the first world.");
+            Logger.LogInfo("World Performance loaded: unseen world effects pause, torch flames beyond 30 m come from shared copies of their systems, small objects beyond 60 m cast no sun shadows, the display mode is read twice a second, resting items skip wave heights, silenced looping sounds pause, particle systems stop naming meshes they never draw, resting objects keep their ground heights, the animators of resting doors pause, water volumes share their water time, saves reuse an unchanged packed map and pack a changed one on a worker, the hourly asset unload waits for a natural pause, location and dungeon room assets stay loaded until one, ground snapping leaves terrain render meshes to the next frames, terrain rebuilds colour tiles from their corners once and bake their colliders on workers, the distant terrain builds its moved regions one a frame and shows them together, empty reference arrays space collections out, biome borders log no warning, key hints refresh only their own labels, health bars the hud would hide again behind the camera stay hidden, sign writing beyond 60 m is not drawn, the intro logos are skipped, creatures at rest sleep, reuse their ground rays and update every few steps, idle cooking and weather effects pause, containers skip reloading unchanged items, building keeps each nearby piece's snap points, idle vine segments stop updating, the mist emitter runs at most 10 times a second, packages write floats without garbage, network records are sent and read without temporary lists and delegates, active-area tests make no garbage and collision callbacks reuse their objects. The spatial building renderer and the later presentation wait start with the first world.");
         }
 
         // One feature that cannot start leaves the others running.
@@ -346,6 +347,7 @@ namespace WorldPerformance
             SilencedLoops.LateUpdate();
             UnusedParticleMeshes.LateUpdate();
             DeferredAssetUnload.LateUpdate();
+            KeptStreamedAssets.LateUpdate();
             ServerAssetUnload.LateUpdate();
             MapDataPacking.LateUpdate();
             SnappingRenderMeshes.LateUpdate();
@@ -383,6 +385,7 @@ namespace WorldPerformance
             SharedWaterTime.Stop();
             MapDataPacking.Stop();
             DeferredAssetUnload.Stop();
+            KeptStreamedAssets.Stop();
             SnappingRenderMeshes.Stop();
             TerrainRebuilds.Stop();
             GrassGround.Stop();
