@@ -451,7 +451,8 @@ namespace WorldPerformance
             (typeof(Beehive), new[] { "m_beeEffect" }, new[] { "UpdateBees" }),
             (typeof(WispSpawner), new[] { "m_wispsNearbyObject" }, new[] { "UpdateDemister" }),
             (typeof(Trap), new[] { "m_visualArmed", "m_visualUnarmed" }, new[] { "UpdateState", "TriggerTrap" }),
-            (typeof(CraftingStation), new[] { "m_areaMarker", "m_inUseObject", "m_haveFireObject" }, new[] { "ShowAreaMarker", "HideMarker", "CustomUpdate", "CheckFire" }),
+            // A station's update every frame, CustomUpdate, is followed where it switches its in-use object; see InUseSwitches.
+            (typeof(CraftingStation), new[] { "m_areaMarker", "m_inUseObject", "m_haveFireObject" }, new[] { "ShowAreaMarker", "HideMarker", "CheckFire" }),
             // An item stand destroys and creates the model of the item it holds instead of switching one, so its method
             // compares the renderers themselves.
             (typeof(ItemStand), new string[0], new[] { "SetVisualItem" }) };
@@ -517,8 +518,8 @@ namespace WorldPerformance
         }
 
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".spatial-buildings");
-        private static readonly Dictionary<WearNTear, Member> pieces = new Dictionary<WearNTear, Member>();
-        private static readonly Dictionary<ZNetView, Member> natural = new Dictionary<ZNetView, Member>();
+        private static readonly Dictionary<WearNTear, Member> pieces = new Dictionary<WearNTear, Member>(Identity<WearNTear>.Instance);
+        private static readonly Dictionary<ZNetView, Member> natural = new Dictionary<ZNetView, Member>(Identity<ZNetView>.Instance);
         private static readonly Dictionary<int, Member> rendererMembers = new Dictionary<int, Member>();
         // Each registered piece's switched behaviours by instance id, with the piece's object and its member, or none for a
         // piece that stays native, which their visual methods would otherwise find by searching up the hierarchy on every
@@ -624,6 +625,11 @@ namespace WorldPerformance
         private static GraphicsBuffer slotRuns;
         private static Run[] runs = new Run[SlotLimit * 8];
         private static readonly List<Batch> compactions = new List<Batch>();
+        // The meshes with twins casting small parts' shadows, which the shadow distance checks look through.
+        private static readonly List<Batch> twins = new List<Batch>();
+        private static readonly AccessTools.FieldRef<WearNTear, ZNetView> wearViews = AccessTools.FieldRefAccess<WearNTear, ZNetView>("m_nview");
+        // Whether the stations' update reports the switch of its in-use object, rather than being checked after every call.
+        private static bool inUseFollowed;
         private static readonly int slotCompactionId = Shader.PropertyToID("_SlotCompaction"), slotRunsId = Shader.PropertyToID("_SlotRuns"),
             mergedIndicesId = Shader.PropertyToID("_MergedIndices");
         private static bool flushPending, skyDepth, linear;
@@ -774,6 +780,11 @@ namespace WorldPerformance
                         if (method != null) patches.Patch(method, postfix: switched);
                         else { allowedBehaviours.Remove(entry.type); Plugin.Fallback("World Performance: " + entry.type.Name + "." + name + " is missing; its pieces stay native"); }
                     }
+                var update = AccessTools.Method(typeof(CraftingStation), nameof(CraftingStation.CustomUpdate));
+                inUseFollowed = false;
+                patches.Patch(update, transpiler: new HarmonyMethod(typeof(SpatialBuildings), nameof(InUseSwitches)));
+                // A changed update is checked after every call instead, as the other visual methods are.
+                if (!inUseFollowed) patches.Patch(update, postfix: switched);
                 var depth = UnityEngine.Object.FindAnyObjectByType<DepthCamera>();
                 if (depth) SkyCamera(depth);
                 foreach (var wear in WearNTear.GetAllInstances()) if (wear) pending.Enqueue((wear, -1));
@@ -839,6 +850,7 @@ namespace WorldPerformance
             foreach (var cell in cells.Values)
                 for (int index = cell.Batches.Count - 1; index >= 0; index--) DestroyBatch(cell.Batches[index]);
             compactions.Clear();
+            twins.Clear();
             skyPending.Clear();
             skyScanned = false;
             foreach (var member in Members()) if (member.Owned && !member.Away) ShowNative(member);
@@ -949,9 +961,8 @@ namespace WorldPerformance
         {
             if (!now && Time.realtimeSinceStartup < nextShadowCheck) return;
             nextShadowCheck = Time.realtimeSinceStartup + .5f;
-            foreach (var cell in cells.Values)
-                foreach (var batch in cell.Batches)
-                    if (batch.TwinTransforms != null && FarSlots(batch, camera)) UploadTwin(batch, 0, batch.Live.Length - 1);
+            foreach (var batch in twins)
+                if (FarSlots(batch, camera)) UploadTwin(batch, 0, batch.Live.Length - 1);
         }
 
         // Whether any slot's distance band changed.
@@ -1221,8 +1232,9 @@ namespace WorldPerformance
         private static void Created(WearNTear __instance)
         {
             if (!Running) return;
-            // A placement ghost has no network record and stays native.
-            var view = __instance.GetComponent<ZNetView>();
+            // A placement ghost has no network record and stays native. The piece's wake took its view before this runs.
+            var view = wearViews(__instance);
+            if ((object)view == null) view = __instance.GetComponent<ZNetView>();
             if (view && view.GetZDO() != null) pending.Enqueue((__instance, Time.frameCount));
         }
 
@@ -1319,22 +1331,24 @@ namespace WorldPerformance
 
         private static void RockChanged(MineRock __instance) => VisibilityChanged(__instance, "mined");
 
-        // A behaviour switched objects of its own piece or natural object: its own objects first, which is a few reads, then the
-        // renderers only when those changed. An item stand has no switched objects and compares the renderers directly.
+        // A behaviour switched objects of its own piece or natural object: its own objects first, which is a few reads and is
+        // most often all, then the renderers only when those changed. An item stand has no switched objects and compares the
+        // renderers directly.
         private static void SwitchedVisualChanged(Component __instance)
         {
             if (!Running || !__instance) return;
             var member = SwitchedMember(__instance);
             if (member == null) return;
+            ulong switched = 0;
+            if (member.Switches.Length > 0)
+            {
+                switched = SwitchState(member);
+                if (switched == member.Switched) return;
+            }
             using (new Timed(VisualHooks))
                 try
                 {
-                    if (member.Switches.Length > 0)
-                    {
-                        ulong switched = SwitchState(member);
-                        if (switched == member.Switched) return;
-                        member.Switched = switched;
-                    }
+                    if (member.Switches.Length > 0) member.Switched = switched;
                     ulong signature = Signature(member);
                     if (signature == member.Signature) return;
                     member.Signature = signature;
@@ -1352,6 +1366,25 @@ namespace WorldPerformance
         {
             var wear = behaviour.GetComponentInParent<WearNTear>();
             return wear && pieces.TryGetValue(wear, out var piece) ? piece : NaturalOf(behaviour);
+        }
+
+        // A crafting station's update every frame changes nothing else it draws but its in-use object, only in
+        // m_inUseObject.SetActive(flag), so the station is checked right after that call instead of after every update; no mod
+        // in the pack switches a station's objects.
+        private static IEnumerable<CodeInstruction> InUseSwitches(IEnumerable<CodeInstruction> instructions)
+        {
+            var code = instructions.ToList();
+            var inUse = AccessTools.Field(typeof(CraftingStation), "m_inUseObject");
+            var setActive = AccessTools.Method(typeof(GameObject), nameof(GameObject.SetActive));
+            var calls = Enumerable.Range(0, code.Count).Where(index => code[index].Calls(setActive)).ToList();
+            if (calls.Count != 1 || code.FindLastIndex(calls[0], instruction => instruction.LoadsField(inUse)) < 0)
+            {
+                Plugin.Fallback("CraftingStation.CustomUpdate no longer switches only its in-use object, so stations are checked after every update.");
+                return code;
+            }
+            code.InsertRange(calls[0] + 1, new[] { new CodeInstruction(OpCodes.Ldarg_0), new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(SpatialBuildings), nameof(SwitchedVisualChanged))) });
+            inUseFollowed = true;
+            return code;
         }
 
         private static void VisibilityChanged(Component component, string reason)
@@ -1430,12 +1463,12 @@ namespace WorldPerformance
         private static void VisualChanged(WearNTear __instance)
         {
             if (!Running || !pieces.TryGetValue(__instance, out var member)) return;
+            // Renderers change visibility here only when one of the wear, wetness and snow objects switches.
+            ulong switched = SwitchState(member);
+            if (switched == member.Switched) return;
             using (new Timed(VisualHooks))
                 try
                 {
-                    // Renderers change visibility here only when one of the wear, wetness and snow objects switches.
-                    ulong switched = SwitchState(member);
-                    if (switched == member.Switched) return;
                     member.Switched = switched;
                     ulong signature = Signature(member);
                     if (signature == member.Signature) return;
@@ -1881,28 +1914,33 @@ namespace WorldPerformance
         // Draws only the slots that draw now. A slot draws when its matrix is set, whose last element is 1, and holds nothing
         // otherwise. With the compaction kernel a changed set of slots is queued for the drawn region, filled before the next
         // camera draws; without it the renderer draws the span of the whole mesh holding them.
-        private static void Drawn(Batch batch)
+        private static void Drawn(Batch batch) => Drawn(batch, 0, int.MaxValue);
+
+        // Only the slots from first to last can have changed since the mesh's drawn slots were last known.
+        private static void Drawn(Batch batch, int first, int last)
         {
             if (batch.IndexBuffer == null)
             {
-                int first = int.MaxValue, end = 0;
+                int start = int.MaxValue, end = 0;
                 for (int slot = 0; slot < batch.IndexFirst.Length; slot++)
                     if (batch.TransformData[slot * 2].m33 != 0f)
                     {
-                        first = Math.Min(first, batch.IndexFirst[slot]);
+                        start = Math.Min(start, batch.IndexFirst[slot]);
                         end = Math.Max(end, batch.IndexFirst[slot] + batch.IndexCount[slot]);
                     }
-                if (first == int.MaxValue) first = end = 0;
-                DrawRange(batch, first, end);
+                if (start == int.MaxValue) start = end = 0;
+                DrawRange(batch, start, end);
                 return;
             }
             ulong low = 0, high = 0;
-            for (int slot = 0; slot < batch.IndexFirst.Length; slot++)
-                if (batch.TransformData[slot * 2].m33 != 0f)
-                {
-                    if (slot < 64) low |= 1UL << slot;
-                    else high |= 1UL << (slot - 64);
-                }
+            if (!batch.DrawnKnown) { first = 0; last = int.MaxValue; }
+            else { low = batch.DrawnLow; high = batch.DrawnHigh; }
+            for (int slot = Math.Max(first, 0); slot <= last && slot < batch.IndexFirst.Length; slot++)
+            {
+                bool drawn = batch.TransformData[slot * 2].m33 != 0f;
+                if (slot < 64) low = drawn ? low | 1UL << slot : low & ~(1UL << slot);
+                else high = drawn ? high | 1UL << (slot - 64) : high & ~(1UL << (slot - 64));
+            }
             if (batch.DrawnKnown && low == batch.DrawnLow && high == batch.DrawnHigh) return;
             batch.DrawnKnown = true;
             batch.DrawnLow = low;
@@ -2172,7 +2210,7 @@ namespace WorldPerformance
                             {
                                 batch.Transforms.SetData(batch.TransformData, batch.TransformFrom * 2, batch.TransformFrom * 2, (batch.TransformTo - batch.TransformFrom + 1) * 2);
                                 UploadTwin(batch, batch.TransformFrom, batch.TransformTo);
-                                Drawn(batch);
+                                Drawn(batch, batch.TransformFrom, batch.TransformTo);
                             }
                             if (batch.AppearanceTo >= 0 && batch.Appearances != null)
                                 batch.Appearances.SetData(batch.AppearanceData, batch.AppearanceFrom, batch.AppearanceFrom, batch.AppearanceTo - batch.AppearanceFrom + 1);
@@ -2204,7 +2242,8 @@ namespace WorldPerformance
             probeState.SetData(probeData);
         }
 
-        internal static void LateUpdate()
+        // The main camera and its position, which the plugin reads once for this and small far shadows.
+        internal static void LateUpdate(Camera camera, Vector3 position)
         {
             if (!Running || !ZNetScene.instance) return;
             try
@@ -2215,8 +2254,6 @@ namespace WorldPerformance
                 bool waiting = frame > LongFrame * steadyMilliseconds;
                 steadyMilliseconds = Mathf.Lerp(steadyMilliseconds, frame, frame < steadyMilliseconds ? SteadyFall : SteadyRise);
                 budgetMilliseconds = Mathf.Clamp(frameMilliseconds * BudgetShare, BudgetMinimum, BudgetMaximum);
-                var camera = Utils.GetMainCamera();
-                var position = camera ? camera.transform.position : Vector3.zero;
                 // Also checked here for frames the main camera does not render by itself, as in batch mode.
                 if (camera) using (new Timed(DetailChecks)) { CheckDetails(camera, position); CheckSmallShadows(position, false); }
                 budgetStart = Stopwatch.GetTimestamp();
@@ -2231,18 +2268,19 @@ namespace WorldPerformance
                     capEnd = budgetStart + Ticks(FrameMaximum) - frameTicks - Math.Max(afterReserve, Ticks(MinimumReserve));
                 }
                 overrun = false;
+                // Steps with nothing waiting are passed over, untimed.
                 if (camera)
                 {
-                    using (new Timed(Applies)) Complete(position);
-                    using (new Timed(Arrivals)) { OwnCompleted(position); CheckFinishing(position); }
-                    using (new Timed(DetailChecks)) DropVoidChecks();
+                    if (builds.Count > 0) using (new Timed(Applies)) Complete(position);
+                    if (owning.Count > 0 || finishing.Count > 0) using (new Timed(Arrivals)) { OwnCompleted(position); CheckFinishing(position); }
+                    if (checks.Count > (pieces.Count + natural.Count) * 2 + 64) using (new Timed(DetailChecks)) DropVoidChecks();
                 }
-                using (new Timed(Removals)) Forget();
+                if (removing.Count > 0) using (new Timed(Removals)) Forget();
                 using (new Timed(SkyPreparation)) PrepareSky();
-                using (new Timed(Readbacks)) CopyReadables();
-                if (camera) using (new Timed(Planning)) Schedule(position);
-                using (new Timed(Requests)) while (requests.Count > 0 && Open()) Request(requests.Dequeue());
-                using (new Timed(Registration)) Register();
+                if (received.Count > 0) using (new Timed(Readbacks)) CopyReadables();
+                if (camera && active.Count > 0) using (new Timed(Planning)) Schedule(position);
+                if (requests.Count > 0) using (new Timed(Requests)) while (requests.Count > 0 && Open()) Request(requests.Dequeue());
+                if (pending.Count > 0 || pendingNatural.Count > 0) using (new Timed(Registration)) Register();
                 using (new Timed(ShadowedLights)) UpdateLights();
                 lateFrame = Time.frameCount;
                 lateTicks = frameTicks;
@@ -2273,6 +2311,7 @@ namespace WorldPerformance
                 member.SwitchedIds = MapSwitched(wear, member);
                 Join(member, wear.transform.position);
             }
+            if (pendingNatural.Count == 0) return;
             float now = Time.realtimeSinceStartup;
             while (pendingNatural.Count > 0 && Open())
             {
@@ -2999,6 +3038,7 @@ namespace WorldPerformance
                 if (cell.Members.Count == 0 && cell.Batches.Count == 0) cells.Remove(cell.Key);
             }
             idle.Clear();
+            cellOrder.Clear();
         }
 
         private static bool Readable(Member member)
@@ -3241,6 +3281,7 @@ namespace WorldPerformance
             if (key.Shadows == ShadowCastingMode.On && key.Small)
             {
                 batch.TwinTransforms = new GraphicsBuffer(GraphicsBuffer.Target.Constant, SlotLimit * 2, 64);
+                twins.Add(batch);
                 batch.TwinData = new Matrix4x4[SlotLimit * 2];
                 batch.SlotFar = new bool[SlotLimit];
                 batch.TwinProperties = new MaterialPropertyBlock();
@@ -3273,6 +3314,7 @@ namespace WorldPerformance
             mergedBytes -= batch.Bytes;
             batch.Bytes = 0;
             batch.Transforms?.Dispose();
+            if (batch.TwinTransforms != null) twins.Remove(batch);
             batch.TwinTransforms?.Dispose();
             batch.TwinTransforms = null;
             batch.TwinProperties = null;

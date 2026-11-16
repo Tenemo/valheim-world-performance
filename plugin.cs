@@ -327,8 +327,11 @@ namespace WorldPerformance
                 PresentationWait.Start();
                 StartRenderer();
             }
-            SpatialBuildings.LateUpdate();
-            WorldPerformance.SmallFarShadows.LateUpdate();
+            // Nothing moves the camera between the two.
+            var camera = Utils.GetMainCamera();
+            var position = camera ? camera.transform.position : Vector3.zero;
+            SpatialBuildings.LateUpdate(camera, position);
+            WorldPerformance.SmallFarShadows.LateUpdate(camera, position);
             SilencedLoops.LateUpdate();
             DeferredAssetUnload.LateUpdate();
             ServerAssetUnload.LateUpdate();

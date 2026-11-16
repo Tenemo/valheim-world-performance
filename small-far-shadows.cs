@@ -133,15 +133,14 @@ namespace WorldPerformance
             return mesh.bounds.size.magnitude * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
         }
 
-        internal static void LateUpdate()
+        // The main camera and its position, which the plugin reads once for this and the spatial building renderer.
+        internal static void LateUpdate(Camera camera, Vector3 eye)
         {
             if (!Enabled) return;
             try
             {
                 Register();
-                var camera = Utils.GetMainCamera();
                 if (!camera || casters.Count == 0) return;
-                Vector3 eye = camera.transform.position;
                 owed = Mathf.Min(owed + casters.Count * Time.unscaledDeltaTime / Period, casters.Count);
                 int step = (int)owed;
                 owed -= step;
@@ -180,6 +179,7 @@ namespace WorldPerformance
         // Objects a moment after they are created, once their own setup has run.
         private static void Register()
         {
+            if (pending.Count == 0) return;
             float now = Time.realtimeSinceStartup;
             for (int done = 0; done < RegistrationsPerFrame && pending.Count > 0 && now - pending.Peek().time >= RegisterDelay; done++)
             {
