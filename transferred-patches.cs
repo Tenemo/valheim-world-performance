@@ -34,6 +34,7 @@ namespace WorldPerformance
         internal const string Jotunn = "com.jotunn.jotunn";
         internal const string Sailing = "org.bepinex.plugins.sailing";
         internal const string ConditionalConfigSync = "_shudnal.ConditionalConfigSync";
+        internal const string AzuAntiArthriticCrafting = "Azumatt.AzuAntiArthriticCrafting";
         private static readonly Dictionary<string, string[]> Supported = new Dictionary<string, string[]>
         {
             { QuickStack, new[] { "1.4.16" } }, { DropThat, new[] { "3.1.7" } },
@@ -46,6 +47,7 @@ namespace WorldPerformance
             { Jotunn, new[] { "2.30.2" } },
             { Sailing, new[] { "1.1.12" } },
             { ConditionalConfigSync, new[] { "1.0.11" } },
+            { AzuAntiArthriticCrafting, new[] { "2.1.12" } },
         };
 
         internal static bool TryGet(string id, out PluginInfo plugin)
@@ -181,6 +183,7 @@ namespace WorldPerformance
                 Optional(typeof(ConfigSyncFlush), patches => ConfigSyncFlush.Initialize(patches, Plugin.Log));
                 Optional(typeof(EpicLootLowHealth), patches => EpicLootLowHealth.Initialize(patches, Plugin.Log));
                 Optional(typeof(EpicLootFrameTrims), patches => EpicLootFrameTrims.Initialize(patches, Plugin.Log));
+                Optional(typeof(SettledAnswers), patches => SettledAnswers.Initialize(patches, Plugin.Log));
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
