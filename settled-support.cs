@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+using System.Linq;
 using HarmonyLib;
 using UnityEngine;
 
@@ -17,20 +17,21 @@ namespace WorldPerformance
     // and the 1.0.20 server's check has no remembered supporter list.
     internal static class SettledSupport
     {
-        private sealed class Identity : IEqualityComparer<WearNTear>
-        {
-            public bool Equals(WearNTear first, WearNTear second) => ReferenceEquals(first, second);
-            public int GetHashCode(WearNTear piece) => RuntimeHelpers.GetHashCode(piece);
-        }
-
-        private sealed class Record
+        // A piece's kept colliders and their transforms, and ground support's state for it.
+        internal sealed class Record
         {
             internal Collider[] Colliders;
             internal Transform[] Transforms;
+            // The terrain version ground support last checked the piece at, and whether the ground fully supported it then.
+            internal int Terrain = -1;
+            internal bool Grounded;
         }
 
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".settled-support");
-        private static readonly Dictionary<WearNTear, Record> records = new Dictionary<WearNTear, Record>(new Identity());
+        private static readonly Dictionary<WearNTear, Record> records = new Dictionary<WearNTear, Record>(Identity<WearNTear>.Instance);
+        // The record ground support found for the piece being checked, possibly none, so this check does not look it up again.
+        private static WearNTear handedPiece;
+        private static Record handedRecord;
         // Bound in Start, so a game without these members fails only this feature's start.
         private static AccessTools.FieldRef<WearNTear, List<Collider>> colliders;
         private static AccessTools.FieldRef<WearNTear, List<WearNTear>> supporters;
@@ -78,6 +79,7 @@ namespace WorldPerformance
             Running = false;
             patches.UnpatchSelf();
             records.Clear();
+            Hand(null, null);
         }
 
         private static bool Prefix(WearNTear __instance, bool __runOriginal)
@@ -100,8 +102,9 @@ namespace WorldPerformance
                 if (remembered[index] == null) return true;
                 var piece = pieces[index];
                 if (piece == null || !piece.m_supports || transforms[index].position != places[index]) return true;
+                // An owner always has an owner: the game sets both flags together.
                 var network = view(piece);
-                float value = network.IsOwner() && network.HasOwner() ? support(piece) : supportOf(piece);
+                float value = network.IsOwner() ? support(piece) : supportOf(piece);
                 if (value > strongest) strongest = value;
                 if (!value.Equals(supports[index])) return true;
             }
@@ -114,7 +117,10 @@ namespace WorldPerformance
         // The transforms of the colliders the piece remembers, kept until its list holds other colliders.
         private static Record Remembered(WearNTear piece, List<Collider> remembered, int count)
         {
-            if (records.TryGetValue(piece, out var record) && record.Colliders.Length == count)
+            Record record;
+            if (ReferenceEquals(handedPiece, piece)) record = handedRecord;
+            else records.TryGetValue(piece, out record);
+            if (record != null && record.Colliders != null && record.Colliders.Length == count)
             {
                 var kept = record.Colliders;
                 int index = 0;
@@ -130,14 +136,34 @@ namespace WorldPerformance
                 found[index] = collider;
                 transforms[index] = collider.transform;
             }
-            if (record == null) records[piece] = record = new Record();
+            if (record == null)
+            {
+                records[piece] = record = new Record();
+                if (ReferenceEquals(handedPiece, piece)) handedRecord = record;
+            }
             record.Colliders = found;
             record.Transforms = transforms;
             return record;
         }
 
-        private static void Destroyed(WearNTear __instance) => records.Remove(__instance);
+        private static void Destroyed(WearNTear __instance)
+        {
+            records.Remove(__instance);
+            if (ReferenceEquals(handedPiece, __instance)) Hand(null, null);
+        }
 
-        internal static int Records => records.Count;
+        internal static Record Find(WearNTear piece) => records.TryGetValue(piece, out var record) ? record : null;
+
+        internal static Record Create(WearNTear piece) => records[piece] = new Record();
+
+        internal static void Hand(WearNTear piece, Record record)
+        {
+            handedPiece = piece;
+            handedRecord = record;
+        }
+
+        internal static Record Handed(WearNTear piece) => ReferenceEquals(handedPiece, piece) ? handedRecord : Find(piece);
+
+        internal static int Records => records.Values.Count(record => record.Colliders != null);
     }
 }

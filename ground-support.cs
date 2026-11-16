@@ -13,16 +13,12 @@ namespace WorldPerformance
     // touching the ground always gives full support. A piece the game's own check found on the ground now keeps its full
     // support without the check until the game clears its support cache, as damage, repair, a piece placed or destroyed
     // against it and a rebuild of its zone's terrain do, or until any terrain is rebuilt, loaded or unloaded.
+    // A game's pieces keep this in settled support's records, so that a check looks its piece up once for both; a dedicated
+    // server, where settled support does not run, keeps it in a table of its own.
     [HarmonyPatch(typeof(WearNTear), "UpdateSupport")]
     internal static class GroundSupport
     {
-        private sealed class State
-        {
-            internal int terrain = -1;
-            internal bool grounded;
-        }
-
-        private static readonly ConditionalWeakTable<WearNTear, State> States = new ConditionalWeakTable<WearNTear, State>();
+        private static readonly ConditionalWeakTable<WearNTear, SettledSupport.Record> States = new ConditionalWeakTable<WearNTear, SettledSupport.Record>();
         private static readonly AccessTools.FieldRef<WearNTear, float> Support = AccessTools.FieldRefAccess<WearNTear, float>("m_support");
         private static readonly AccessTools.FieldRef<WearNTear, bool> ClearsNeighbours = AccessTools.FieldRefAccess<WearNTear, bool>("m_clearCachedSupport");
         private static readonly Func<WearNTear, float> MaxSupport = AccessTools.MethodDelegate<Func<WearNTear, float>>(AccessTools.Method(typeof(WearNTear), "GetMaxSupport"));
@@ -30,20 +26,27 @@ namespace WorldPerformance
         // Set while the game's check runs, when its overlap finds terrain.
         private static bool touchedTerrain;
 
+        private static SettledSupport.Record Find(WearNTear piece) =>
+            SettledSupport.Running ? SettledSupport.Find(piece) : States.TryGetValue(piece, out var state) ? state : null;
+
         private static bool Prefix(WearNTear __instance)
         {
-            if (States.TryGetValue(__instance, out var state) && state.grounded && state.terrain == terrainVersion && !ClearsNeighbours(__instance))
+            var state = Find(__instance);
+            if (state != null && state.Grounded && state.Terrain == terrainVersion && !ClearsNeighbours(__instance))
                 return false;
+            SettledSupport.Hand(__instance, state);
             touchedTerrain = false;
             return true;
         }
 
         private static void Postfix(WearNTear __instance, bool __runOriginal)
         {
+            var state = SettledSupport.Handed(__instance);
+            SettledSupport.Hand(null, null);
             if (!__runOriginal) return;
-            var state = States.GetOrCreateValue(__instance);
-            state.terrain = terrainVersion;
-            state.grounded = touchedTerrain && Support(__instance) >= MaxSupport(__instance);
+            if (state == null) state = SettledSupport.Running ? SettledSupport.Create(__instance) : States.GetOrCreateValue(__instance);
+            state.Terrain = terrainVersion;
+            state.Grounded = touchedTerrain && Support(__instance) >= MaxSupport(__instance);
         }
 
         // The check marks terrain among its overlap's colliders in a local flag; this records the same moment.
@@ -66,7 +69,8 @@ namespace WorldPerformance
         {
             private static void Postfix(WearNTear __instance)
             {
-                if (States.TryGetValue(__instance, out var state)) state.terrain = -1;
+                var state = Find(__instance);
+                if (state != null) state.Terrain = -1;
             }
         }
 
