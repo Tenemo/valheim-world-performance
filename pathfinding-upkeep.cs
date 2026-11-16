@@ -40,7 +40,10 @@ namespace WorldPerformance
         {
             point.y = 6000f;
             int water = pathfinding.m_waterLayers.value;
-            int count = Physics.RaycastNonAlloc(point, Vector3.down, buffer, 10000f, testWater ? pathfinding.m_layers.value | water : pathfinding.m_layers.value);
+            int mask = testWater ? pathfinding.m_layers.value | water : pathfinding.m_layers.value;
+            int count = Physics.RaycastNonAlloc(point, Vector3.down, buffer, 10000f, mask);
+            // Without water layers in the ray's mask no hit can be water, so the hits' layers need not be read.
+            bool wet = (mask & water) != 0;
             for (int index = 1; index < count; index++)
             {
                 var hit = buffer[index];
@@ -54,7 +57,7 @@ namespace WorldPerformance
                 Vector3 ground = buffer[index].point;
                 if (Mathf.Abs(ground.y - level) < agentHeight) continue;
                 level = ground.y;
-                if (((1 << buffer[index].collider.gameObject.layer) & water) != 0) ground.y -= SwimDepth(settings);
+                if (wet && ((1 << buffer[index].collider.gameObject.layer) & water) != 0) ground.y -= SwimDepth(settings);
                 hits.Add(ground);
             }
         }
@@ -153,6 +156,10 @@ namespace WorldPerformance
         // Each queued tile mesh with its data and the total of removed links at which the links queued before it are gone.
         private static readonly Queue<KeyValuePair<long, NavMeshData>> Expired = new Queue<KeyValuePair<long, NavMeshData>>();
         private static long removedLinks;
+        // The tile table the last walk found nothing expired in, its size then and the earliest poke time it held.
+        private static object boundTiles;
+        private static int boundCount;
+        private static float earliestPoke;
 
         // Valheim 1.0.15: TimeoutTiles drops the first tile not poked within m_tileTimeout and queues its links and mesh for
         // removal. It left the tile's NavMeshData to the hourly unloading of unused assets, and it could also drop the tile
@@ -169,24 +176,39 @@ namespace WorldPerformance
             Queue<NavMeshDataInstance> meshes) where T : class
         {
             float now = Time.time;
-            foreach (var pair in (Dictionary<Vector3Int, T>)tiles)
+            var all = (Dictionary<Vector3Int, T>)tiles;
+            // Tiles are added only by GetNavTile and removed only here and when the world unloads, and a poke only raises a
+            // tile's time, so while the same table holds as many tiles as the last walk found none expired among, each has
+            // been poked at least as late as the earliest that walk saw.
+            if (ReferenceEquals(boundTiles, tiles) && all.Count == boundCount && now - earliestPoke <= pathfinding.m_tileTimeout) return;
+            boundTiles = null;
+            float earliest = float.PositiveInfinity;
+            foreach (var pair in all)
             {
                 T tile = pair.Value;
-                if (now - PokeTime(tile) <= pathfinding.m_tileTimeout || ReferenceEquals(tile, building)) continue;
-                foreach (var edge in new[] { EastLinks(tile), NorthLinks(tile) })
-                {
-                    foreach (var link in edge) links.Enqueue(link.Value);
-                    edge.Clear();
-                }
+                float poked = PokeTime(tile);
+                if (poked < earliest) earliest = poked;
+                if (now - poked <= pathfinding.m_tileTimeout || ReferenceEquals(tile, building)) continue;
+                Clear(EastLinks(tile), links);
+                Clear(NorthLinks(tile), links);
                 if (Mesh(tile).valid)
                 {
                     meshes.Enqueue(Mesh(tile));
                     Expired.Enqueue(new KeyValuePair<long, NavMeshData>(removedLinks + links.Count, Data(tile)));
                 }
                 else if (Data(tile) != null) UnityEngine.Object.Destroy(Data(tile));
-                ((Dictionary<Vector3Int, T>)tiles).Remove(pair.Key);
+                all.Remove(pair.Key);
                 return;
             }
+            boundTiles = tiles;
+            boundCount = all.Count;
+            earliestPoke = earliest;
+        }
+
+        private static void Clear(List<KeyValuePair<Vector3, NavMeshLinkInstance>> edge, Queue<NavMeshLinkInstance> links)
+        {
+            foreach (var link in edge) links.Enqueue(link.Value);
+            edge.Clear();
         }
 
         // Valheim 1.0.21: UpdateAsyncBuild adds a finished first build's mesh with NavMesh.AddNavMeshData.
@@ -197,7 +219,11 @@ namespace WorldPerformance
 
         // Valheim 1.0.21: OnDestroy removes every tile's mesh natively when the world unloads.
         [HarmonyPrefix, HarmonyPatch("OnDestroy")]
-        private static void Unloaded() => PathfindingRecords.Forget();
+        private static void Unloaded()
+        {
+            boundTiles = null;
+            PathfindingRecords.Forget();
+        }
 
         // Valheim 1.0.15: DestroyQueuedNavmeshData removes a fortieth of the queued links, or up to 25 within a millisecond,
         // and only when no link is queued, one queued tile. The same link removal now runs, then one tile whose links are gone.
