@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4
+
+- Travelling past locations and dungeons and into large bases holds far fewer long frames. A location or dungeon you leave is let go at the next loading screen or open menu instead of freezing a frame for 35-52 ms, keeping up to 64 of them, about 100 MB more memory. Objects you leave behind are removed over several frames, so the worst of those frames fell from up to 41 ms to 15 ms.
+- Grass around you builds in about half the time while you move.
+- Staff of Fracturing's splinter impacts and enemies' weakness hits cost far less, so the longest frames of a Fracturing barrage are less than half as long.
+- Turning the camera quickly at a large base takes up to about 1.2 ms less of each frame.
+- Many smaller savings in buildings, creatures, sounds, fires and other mods' per-frame work.
+
 ## 1.0.3
 
 - Large bases take a few hundred fewer draw calls and up to 1.9 ms less render-thread time a frame: merged building and scenery meshes with nothing to draw at the moment are skipped.

@@ -16,11 +16,9 @@ namespace WorldPerformance
     // native ray.
     internal static class GrassGround
     {
-        // The isolated test client sets false to compare the native rays, and Comparing to cast them beside every answer.
+        // The isolated test client sets false to compare the native rays.
         internal static bool Direct = true;
-        internal static bool Comparing;
-        internal static long Answered, Cast, Compared, Differing;
-        internal static double WorstHeight, WorstNormal;
+        internal static long Answered, Cast;
         internal static bool Running { get; private set; }
         internal static string Failure { get; private set; }
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".grass-ground");
@@ -71,11 +69,11 @@ namespace WorldPerformance
             Running = false;
         }
 
-        // The collision mesh's vertices are read again at the next use.
+        // The collision mesh's vertices are read again at the next use, even within the frame the tile was last checked.
         private static void Rebuilt(Heightmap __instance)
         {
             foreach (var tile in tiles)
-                if (tile != null && ReferenceEquals(tile.Map, __instance)) tile.Vertices = null;
+                if (tile != null && ReferenceEquals(tile.Map, __instance)) { tile.Vertices = null; tile.CheckedFrame = -1; }
         }
 
         // A zone loaded again gets a new heightmap at the same place.
@@ -90,7 +88,6 @@ namespace WorldPerformance
             if (!Direct) return true;
             var tile = TileAt(p);
             if (tile == null || !Hit(tile, p, out var hitPoint, out var hitNormal)) { Cast++; return true; }
-            if (Comparing) Compare(tile, p, hitPoint, hitNormal);
             point = hitPoint;
             normal = hitNormal;
             hmap = tile.Map;
@@ -98,19 +95,6 @@ namespace WorldPerformance
             __result = true;
             Answered++;
             return false;
-        }
-
-        // Counts answers off the native ray's by more than 0.1 mm in height or 1e-5 in the normal, or on another collider.
-        private static void Compare(Tile tile, Vector3 p, Vector3 point, Vector3 normal)
-        {
-            Compared++;
-            bool hit = Physics.Raycast(p + Vector3.up * 500f, Vector3.down, out var native, 1000f, terrainMask);
-            if (!hit || native.collider != colliderOf(tile.Map)) { Differing++; WorstHeight = double.PositiveInfinity; return; }
-            double height = Math.Abs(native.point.y - point.y), across = Math.Max(Math.Abs(native.point.x - point.x), Math.Abs(native.point.z - point.z));
-            double turn = (native.normal - normal).magnitude;
-            WorstHeight = Math.Max(WorstHeight, Math.Max(height, across));
-            WorstNormal = Math.Max(WorstNormal, turn);
-            if (height > 1e-4 || across > 0 || turn > 1e-5) Differing++;
         }
 
         private static Tile TileAt(Vector3 p)

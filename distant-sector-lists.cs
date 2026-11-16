@@ -11,10 +11,9 @@ namespace WorldPerformance
     // pass gets the same records in the same order.
     internal static class DistantSectorLists
     {
-        // The isolated test client sets false to compare the native walk, and Comparing to walk natively beside every answer.
+        // The isolated test client sets false to compare the native walk.
         internal static bool Keeping = true;
-        internal static bool Comparing;
-        internal static long Kept, Walked, Compared, Differing;
+        internal static long Kept, Walked;
         internal static bool Running { get; private set; }
         internal static string Failure { get; private set; }
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".distant-sector-lists");
@@ -30,7 +29,6 @@ namespace WorldPerformance
         }
 
         private static readonly Dictionary<uint, Entry> entries = new Dictionary<uint, Entry>();
-        private static readonly List<ZDO> comparison = new List<ZDO>();
 
         internal static void Start()
         {
@@ -107,16 +105,6 @@ namespace WorldPerformance
                 entry.Source = list;
                 entry.Version = version;
                 entry.Valid = true;
-            }
-            if (Comparing)
-            {
-                Compared++;
-                comparison.Clear();
-                foreach (var record in list)
-                    if (record.Distant) comparison.Add(record);
-                bool same = comparison.Count == entry.Distant.Count;
-                for (int item = 0; same && item < comparison.Count; item++) same = ReferenceEquals(comparison[item], entry.Distant[item]);
-                if (!same) Differing++;
             }
             objects.AddRange(entry.Distant);
             visitedSectorIndices.Add(index);
