@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using HarmonyLib;
@@ -10,11 +11,13 @@ namespace WorldPerformance
     // values three or four more, each terrain operation saves two or four floats for every modified vertex of its zone, and a
     // world save writes millions. The mod writes the same bytes of each float and double a package writes through the
     // writer's integer writes, which keep their own buffer. They share nothing but a rough count, so the world save's own
-    // thread writes the same way.
+    // thread writes the same way. A vector's or rotation's floats go to the package's memory stream in one write, the bytes
+    // the integer writes would put there one float at a time.
     internal static class PackageFloats
     {
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".package-floats");
         private static readonly AccessTools.FieldRef<ZPackage, BinaryWriter> writerOf = AccessTools.FieldRefAccess<ZPackage, BinaryWriter>("m_writer");
+        private static readonly AccessTools.FieldRef<BinaryWriter, Stream> streamOf = AccessTools.FieldRefAccess<BinaryWriter, Stream>("OutStream");
         internal static bool Running { get; private set; }
         // Off writes natively, with the arrays; the isolated client switches it for paired measurements.
         internal static bool Lean { get; set; } = true;
@@ -52,6 +55,17 @@ namespace WorldPerformance
 
         private static void Write(BinaryWriter writer, float value) => writer.Write(new Bits { Single = value }.Word);
 
+        // A plain writer puts each float's little-endian bytes straight into its stream, as memory holds them here; any other
+        // writer or stream gets the floats one at a time.
+        private static unsafe void Write(BinaryWriter writer, float* values, int count)
+        {
+            var stream = streamOf(writer);
+            if (writer.GetType() == typeof(BinaryWriter) && stream != null && stream.GetType() == typeof(MemoryStream) && BitConverter.IsLittleEndian)
+                stream.Write(new ReadOnlySpan<byte>(values, count * sizeof(float)));
+            else
+                for (int index = 0; index < count; index++) Write(writer, values[index]);
+        }
+
         private static bool WriteSingle(ZPackage __instance, float data)
         {
             Writes++;
@@ -68,26 +82,28 @@ namespace WorldPerformance
             return false;
         }
 
-        private static bool WriteVector(ZPackage __instance, Vector3 v3)
+        private static unsafe bool WriteVector(ZPackage __instance, Vector3 v3)
         {
             Writes++;
             if (!Lean) return true;
-            var writer = writerOf(__instance);
-            Write(writer, v3.x);
-            Write(writer, v3.y);
-            Write(writer, v3.z);
+            float* values = stackalloc float[3];
+            values[0] = v3.x;
+            values[1] = v3.y;
+            values[2] = v3.z;
+            Write(writerOf(__instance), values, 3);
             return false;
         }
 
-        private static bool WriteRotation(ZPackage __instance, Quaternion q)
+        private static unsafe bool WriteRotation(ZPackage __instance, Quaternion q)
         {
             Writes++;
             if (!Lean) return true;
-            var writer = writerOf(__instance);
-            Write(writer, q.x);
-            Write(writer, q.y);
-            Write(writer, q.z);
-            Write(writer, q.w);
+            float* values = stackalloc float[4];
+            values[0] = q.x;
+            values[1] = q.y;
+            values[2] = q.z;
+            values[3] = q.w;
+            Write(writerOf(__instance), values, 4);
             return false;
         }
     }
