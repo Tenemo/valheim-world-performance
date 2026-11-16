@@ -164,6 +164,7 @@ namespace WorldPerformance
                 Optional(typeof(StatusEffectParts), StatusEffectParts.Initialize);
                 Optional(typeof(CharacterStepTrims), CharacterStepTrims.Initialize);
                 Optional(typeof(SteadySoundLevels), SteadySoundLevels.Initialize);
+                Optional(typeof(CoverChecks), CoverChecks.Initialize);
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
