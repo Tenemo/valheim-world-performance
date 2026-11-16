@@ -45,6 +45,24 @@ namespace WorldPerformance
 
     internal static class Transpilers
     {
+        // The local variable a ldloc or stloc instruction reads or writes.
+        internal static int Local(CodeInstruction instruction)
+        {
+            var opcode = instruction.opcode;
+            if (opcode == System.Reflection.Emit.OpCodes.Ldloc_0 || opcode == System.Reflection.Emit.OpCodes.Stloc_0) return 0;
+            if (opcode == System.Reflection.Emit.OpCodes.Ldloc_1 || opcode == System.Reflection.Emit.OpCodes.Stloc_1) return 1;
+            if (opcode == System.Reflection.Emit.OpCodes.Ldloc_2 || opcode == System.Reflection.Emit.OpCodes.Stloc_2) return 2;
+            if (opcode == System.Reflection.Emit.OpCodes.Ldloc_3 || opcode == System.Reflection.Emit.OpCodes.Stloc_3) return 3;
+            switch (instruction.operand)
+            {
+                case LocalVariableInfo local: return local.LocalIndex;
+                case byte index: return index;
+                case short index: return index;
+                case int index: return index;
+                default: throw new InvalidOperationException("Not a local variable: " + instruction);
+            }
+        }
+
         internal static List<CodeInstruction> CallInstead(IEnumerable<CodeInstruction> instructions, Func<CodeInstruction, bool> match,
             MethodInfo replacement, int expected, string changed)
         {
