@@ -126,9 +126,12 @@ namespace WorldPerformance
         private static void Enter(out bool __state) { running++; __state = true; }
         private static void Leave(bool __state) { if (__state) running--; }
 
-        // Answers for the mod's prefix: true runs the game's own check, which the mod does whenever no matching caller runs.
-        private static bool Skip(ref bool __result)
+        // Answers for the mod's prefix: true runs the game's own check, which the mod does whenever no matching caller runs, and
+        // for a character that has swum half a second or is not a player, which it tests first. That test comes first here
+        // too, before the per-thread count of running methods.
+        private static bool Skip(Humanoid __0, float __1, ref bool __result)
         {
+            if (!(__1 < 0.5f) || !__0.IsPlayer()) { __result = true; return false; }
             if (!Skipping || running > 0) { Searched++; return true; }
             Skipped++;
             __result = true;

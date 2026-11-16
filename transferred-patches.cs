@@ -184,6 +184,7 @@ namespace WorldPerformance
                 Optional(typeof(EpicLootLowHealth), patches => EpicLootLowHealth.Initialize(patches, Plugin.Log));
                 Optional(typeof(EpicLootFrameTrims), patches => EpicLootFrameTrims.Initialize(patches, Plugin.Log));
                 Optional(typeof(SettledAnswers), patches => SettledAnswers.Initialize(patches, Plugin.Log));
+                Optional(typeof(PlayerFirstChecks), patches => PlayerFirstChecks.Initialize(patches, Plugin.Log));
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
