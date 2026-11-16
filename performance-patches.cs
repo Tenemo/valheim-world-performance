@@ -43,6 +43,23 @@ namespace WorldPerformance
         }
     }
 
+    internal static class PatchSets
+    {
+        // Null when every patch on the method is this mod's own or one of the known patch methods, named as
+        // "Namespace.Type+Nested.Method"; otherwise the others. A shortcut that leaves out or reorders a call relies on what
+        // the call's patches do, so it reads them once all mods have loaded.
+        internal static string Unknown(MethodBase method, params string[] known)
+        {
+            var info = Harmony.GetPatchInfo(method);
+            if (info == null) return null;
+            var others = info.Prefixes.Concat(info.Postfixes).Concat(info.Transpilers).Concat(info.Finalizers).Concat(info.ILManipulators)
+                .Select(patch => patch.PatchMethod)
+                .Where(patch => patch.DeclaringType?.Namespace != typeof(PatchSets).Namespace && !known.Contains(patch.DeclaringType?.FullName + "." + patch.Name))
+                .Select(patch => patch.DeclaringType?.FullName + "." + patch.Name).ToList();
+            return others.Count == 0 ? null : method.DeclaringType?.Name + "." + method.Name + " has other patches: " + string.Join(", ", others);
+        }
+    }
+
     internal static class Transpilers
     {
         // The local variable a ldloc or stloc instruction reads or writes.
