@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -22,17 +21,11 @@ namespace WorldPerformance
     // is kept from its first check until it is destroyed.
     internal static class StaticGround
     {
-        private sealed class Identity : IEqualityComparer<StaticPhysics>
-        {
-            public bool Equals(StaticPhysics first, StaticPhysics second) => ReferenceEquals(first, second);
-            public int GetHashCode(StaticPhysics item) => RuntimeHelpers.GetHashCode(item);
-        }
-
         // Answers kept at most; more are forgotten together, which only means casting their rays again.
         private const int Capacity = 1 << 16;
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".static-ground");
         private static readonly Dictionary<Vector2, (bool hit, float height)> answers = new Dictionary<Vector2, (bool hit, float height)>();
-        private static readonly Dictionary<StaticPhysics, Transform> transforms = new Dictionary<StaticPhysics, Transform>(new Identity());
+        private static readonly Dictionary<StaticPhysics, Transform> transforms = new Dictionary<StaticPhysics, Transform>(Identity<StaticPhysics>.Instance);
         private static ZoneSystem answering;
         private static readonly AccessTools.FieldRef<StaticPhysics, bool> falling = AccessTools.FieldRefAccess<StaticPhysics, bool>("m_falling");
         private static readonly AccessTools.FieldRef<StaticPhysics, float> waitedUntil = AccessTools.FieldRefAccess<StaticPhysics, float>("m_updateTime");
@@ -137,8 +130,10 @@ namespace WorldPerformance
             return hit;
         }
 
-        private static void Forget()
+        // A distant region's heightmap has no collider and lies outside the terrain layer, so nothing it does changes an answer.
+        private static void Forget(Heightmap __instance)
         {
+            if (__instance.IsDistantLod) return;
             answers.Clear();
             Forgotten++;
         }
