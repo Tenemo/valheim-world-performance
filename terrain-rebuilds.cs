@@ -25,9 +25,9 @@ namespace WorldPerformance
         private static readonly Func<Heightmap, float, float, Color> nativeColour = AccessTools.MethodDelegate<Func<Heightmap, float, float, Color>>(NativeColourMethod());
         // Bakes started and not yet assigned to their colliders.
         private static readonly List<(MeshCollider collider, Mesh mesh, JobHandle bake)> baking = new List<(MeshCollider, Mesh, JobHandle)>();
-        // The tile being coloured and its corners' colours, looked up again at the start of each render mesh rebuild.
+        // The tile being coloured and its corners' colours, looked up at the start of each render mesh rebuild, where its
+        // corners are the ones every vertex's colour reads.
         private static Heightmap colouring;
-        private static BiomeSector[] colouringCorners;
         private static bool uniform;
         private static Color32 first, second, third, fourth;
         // Forced builds and late-rebuild passes under way, which assign their bakes when they end.
@@ -85,7 +85,6 @@ namespace WorldPerformance
             Running = false;
             batching = 0;
             colouring = null;
-            colouringCorners = null;
             patches.UnpatchSelf();
         }
 
@@ -113,27 +112,28 @@ namespace WorldPerformance
             return code;
         }
 
-        private static void Recolour() => colouring = null;
+        // A distant region colours each vertex from its own biome sector instead, and nothing in the rebuild changes the corners.
+        private static void Recolour(Heightmap __instance)
+        {
+            colouring = null;
+            if (!Colouring || __instance.IsDistantLod) return;
+            var corners = cornersOf(__instance);
+            uniform = corners[0] == corners[1] && corners[0] == corners[2] && corners[0] == corners[3];
+            first = Heightmap.GetBiomeColor(corners[0]);
+            if (!uniform)
+            {
+                second = Heightmap.GetBiomeColor(corners[1]);
+                third = Heightmap.GetBiomeColor(corners[2]);
+                fourth = Heightmap.GetBiomeColor(corners[3]);
+            }
+            colouring = __instance;
+            Coloured++;
+        }
 
         // The game's GetBiomeColor(ix, iy) with the corners' colours looked up once per rebuild instead of for every vertex.
         private static Color Colour(Heightmap map, float ix, float iy)
         {
-            if (!Colouring) return nativeColour(map, ix, iy);
-            var corners = cornersOf(map);
-            if (map != colouring || corners != colouringCorners)
-            {
-                colouring = map;
-                colouringCorners = corners;
-                uniform = corners[0] == corners[1] && corners[0] == corners[2] && corners[0] == corners[3];
-                first = Heightmap.GetBiomeColor(corners[0]);
-                if (!uniform)
-                {
-                    second = Heightmap.GetBiomeColor(corners[1]);
-                    third = Heightmap.GetBiomeColor(corners[2]);
-                    fourth = Heightmap.GetBiomeColor(corners[3]);
-                }
-                Coloured++;
-            }
+            if (!ReferenceEquals(map, colouring) || !Colouring) return nativeColour(map, ix, iy);
             if (uniform) return first;
             return Color32.Lerp(Color32.Lerp(first, second, ix), Color32.Lerp(third, fourth, ix), iy);
         }
@@ -156,7 +156,13 @@ namespace WorldPerformance
         private static void Rebuilding(Heightmap __instance)
         {
             var mesh = collisionMeshOf(__instance);
-            if (mesh && baking.Any(entry => entry.mesh == mesh)) Finish();
+            if (!mesh) return;
+            foreach (var entry in baking)
+                if (entry.mesh == mesh)
+                {
+                    Finish();
+                    return;
+                }
         }
 
         // Assigns every baked collision mesh to its collider, which then uses the baked data instead of cooking it again.
