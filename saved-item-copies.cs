@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Threading;
 using BepInEx.Logging;
 using HarmonyLib;
+using HarmonyLib.Public.Patching;
 using UnityEngine;
 
 namespace WorldPerformance
@@ -78,29 +79,30 @@ namespace WorldPerformance
         }
 
         // The wake must carry only known additions, run in Harmony's order, and nothing else may change what this load replaces.
+        // Harmony's own patch lists are read in place: its public copy of them is made anew for every item.
         private static bool PatchesKnown()
         {
-            var info = Harmony.GetPatchInfo(awake);
-            var postfixes = info?.Postfixes;
-            bool same = postfixes != null && postfixes.Count == wakeSeen.Count;
-            for (int index = 0; same && index < postfixes.Count; index++) same = postfixes[index].PatchMethod == wakeSeen[index];
+            var info = PatchManager.GetPatchInfo(awake);
+            var postfixes = info?.postfixes;
+            bool same = postfixes != null && postfixes.Length == wakeSeen.Count;
+            for (int index = 0; same && index < postfixes.Length; index++) same = postfixes[index].PatchMethod == wakeSeen[index];
             if (!same)
             {
                 wakeSeen.Clear();
                 wake.Clear();
-                knownState = info == null || info.Prefixes.Count == 0 && info.Transpilers.Count == 0 && info.Finalizers.Count == 0 && info.Postfixes.All(patch => Known(patch.PatchMethod));
+                knownState = info == null || info.prefixes.Length == 0 && info.transpilers.Length == 0 && info.finalizers.Length == 0 && info.postfixes.All(patch => Known(patch.PatchMethod));
                 if (info != null)
                 {
-                    wakeSeen.AddRange(info.Postfixes.Select(patch => patch.PatchMethod));
-                    if (knownState) foreach (var method in PatchProcessor.GetSortedPatchMethods(awake, info.Postfixes.ToArray())) if (known.TryGetValue(method, out var addition) && addition != null) wake.Add(addition);
+                    wakeSeen.AddRange(info.postfixes.Select(patch => patch.PatchMethod));
+                    if (knownState) foreach (var method in PatchProcessor.GetSortedPatchMethods(awake, info.postfixes.ToArray())) if (known.TryGetValue(method, out var addition) && addition != null) wake.Add(addition);
                 }
                 if (!knownState)
-                    Plugin.Fallback("loaded items are instantiated natively: the item wake carries " + string.Join(", ", (info?.Prefixes.Concat(info.Transpilers).Concat(info.Finalizers).Concat(info.Postfixes) ?? Enumerable.Empty<Patch>())
+                    Plugin.Fallback("loaded items are instantiated natively: the item wake carries " + string.Join(", ", (info?.prefixes.Concat(info.transpilers).Concat(info.finalizers).Concat(info.postfixes) ?? Enumerable.Empty<Patch>())
                         .Where(patch => !Known(patch.PatchMethod)).Select(patch => patch.owner + " " + patch.PatchMethod.DeclaringType.FullName + "." + patch.PatchMethod.Name)));
             }
-            if (!knownState || Harmony.GetPatchInfo(setQuality) != null || Harmony.GetPatchInfo(ensureValid) != null) return false;
-            var saved = Harmony.GetPatchInfo(savedItem);
-            return saved == null || saved.Transpilers.Count == 0;
+            if (!knownState || PatchManager.GetPatchInfo(setQuality) != null || PatchManager.GetPatchInfo(ensureValid) != null) return false;
+            var saved = PatchManager.GetPatchInfo(savedItem);
+            return saved == null || saved.transpilers.Length == 0;
         }
 
         // An inactive object's ItemDrop is never woken, so it holds whatever item data the load hands it and registers nowhere.
