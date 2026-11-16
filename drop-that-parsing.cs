@@ -61,7 +61,7 @@ namespace WorldPerformance
             conditions = new[] { "ConditionBiome", "ConditionNotBiome", "ConditionLocation", "ConditionNotLocation" }
                 .Select(name => assembly.GetType("DropThat.Drop.CharacterDropSystem.Conditions." + name)).ToArray();
             if (conditions.Any(condition => condition == null)) throw new InvalidOperationException("Drop That's drop conditions changed.");
-            receivedMessages = () => received.Invoke(null, null);
+            receivedMessages = (Func<object>)Delegate.CreateDelegate(typeof(Func<object>), received);
             harmony.Patch(combine, prefix: new HarmonyMethod(typeof(DropThatParsing), nameof(Combine)));
             harmony.Patch(dispatch, prefix: new HarmonyMethod(typeof(DropThatParsing), nameof(Dispatch)));
             log.LogInfo("Drop That's received drop tables are read on a worker thread.");
@@ -136,6 +136,9 @@ namespace WorldPerformance
 
         private static bool Dispatch()
         {
+            // With no result of this mod's waiting, Drop That dispatches as natively; the rest would find that out too.
+            lock (gate)
+                if (pending.Count == 0) return true;
             Task<object> next;
             var queue = (ICollection)receivedMessages();
             lock (queue)
