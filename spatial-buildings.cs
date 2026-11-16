@@ -127,8 +127,90 @@ namespace WorldPerformance
         [StructLayout(LayoutKind.Sequential)]
         private struct Run { public uint First, Place, Count, Unused; }
 
-        // A member's detail-level check, due once the camera has travelled this far in total.
-        private struct Check { internal double Due; internal Member Member; internal int Stamp; }
+        // A member's detail-level check, due once the camera has travelled this far in total, or, parked, once the camera is
+        // this far from the anchor; with where the camera was when the check was made and how far from there it may go before
+        // the member can reach a change.
+        private struct Check { internal double Due; internal Member Member; internal int Stamp; internal Vector3 From; internal float Distance; }
+
+        // A min-heap of checks by when they are due, in an array the checks are read in place from.
+        private sealed class CheckHeap
+        {
+            private Check[] items = new Check[1024];
+            internal int Count;
+            // Set while the top check is being made: the next check queued takes its place and sinks only as far as it is due
+            // later, instead of the last entry taking it and sinking through the whole heap before the next one is added.
+            internal bool Replacing;
+
+            internal Check Top => items[0];
+            internal double TopDue => items[0].Due;
+
+            internal void Clear()
+            {
+                Array.Clear(items, 0, Count);
+                Count = 0;
+                Replacing = false;
+            }
+
+            internal void Push(Check entry)
+            {
+                if (Replacing)
+                {
+                    Replacing = false;
+                    SiftDown(0, entry);
+                    return;
+                }
+                if (Count == items.Length) Array.Resize(ref items, Count * 2);
+                int index = Count++;
+                while (index > 0)
+                {
+                    int parent = (index - 1) / 2;
+                    if (items[parent].Due <= entry.Due) break;
+                    items[index] = items[parent];
+                    index = parent;
+                }
+                items[index] = entry;
+            }
+
+            internal Check Pop()
+            {
+                var top = items[0];
+                var last = items[--Count];
+                items[Count] = default;
+                if (Count > 0) SiftDown(0, last);
+                return top;
+            }
+
+            private void SiftDown(int index, Check entry)
+            {
+                while (true)
+                {
+                    int child = index * 2 + 1;
+                    if (child >= Count) break;
+                    if (child + 1 < Count && items[child + 1].Due < items[child].Due) child++;
+                    if (entry.Due <= items[child].Due) break;
+                    items[index] = items[child];
+                    index = child;
+                }
+                items[index] = entry;
+            }
+
+            // Gives each entry the due time the function returns, drops those it gives a negative one and orders the rest again.
+            internal void Keep(Func<Check, double> due)
+            {
+                int kept = 0;
+                for (int index = 0; index < Count; index++)
+                {
+                    var entry = items[index];
+                    double value = due(entry);
+                    if (value < 0) continue;
+                    entry.Due = value;
+                    items[kept++] = entry;
+                }
+                Array.Clear(items, kept, Count - kept);
+                Count = kept;
+                for (int index = Count / 2 - 1; index >= 0; index--) SiftDown(index, items[index]);
+            }
+        }
 
         private sealed class Source
         {
@@ -180,6 +262,8 @@ namespace WorldPerformance
             internal Vector3 Reference;
             internal float Size;
             internal float[] Thresholds;
+            // Whether no threshold is above the one before it, as the engine's levels are, so a level holds between two of them.
+            internal bool Descending;
             internal int Level;
             internal bool Owned, Merging, NativeEnabled, Fades;
         }
@@ -235,6 +319,12 @@ namespace WorldPerformance
             internal int Coverage;
             // The member's place among those finishing, or -1.
             internal int Finishing = -1;
+            // For a member with one group of descending thresholds, that group's level as last measured: its reference point and
+            // scale, the bounds of the screen share within which the level holds, the distances of its changes and whether it
+            // crossfades. While the member keeps its check and stays owned and drawing merged, none of these change.
+            internal bool Banded, BandFades;
+            internal Vector3 BandReference;
+            internal float BandScale, BandLower, BandUpper, BandNear, BandFar;
         }
 
         private sealed class Batch
@@ -536,7 +626,17 @@ namespace WorldPerformance
         // Owned members' next detail-level checks, a min-heap by the camera travel at which each is due. The camera's
         // distance to a group changes no faster than the camera moves, so a member needs no check before the camera has
         // travelled as far as its nearest level change.
-        private static readonly List<Check> checks = new List<Check>();
+        private static readonly CheckHeap checks = new CheckHeap();
+        // Checks that wait for the camera to go far enough from the anchor: a camera turning around the player travels far
+        // without going far, and a member's distance to a group cannot change by more than the camera's distance from where
+        // it was checked, which is at most its distance from the anchor plus the anchor's from there.
+        private static readonly CheckHeap parked = new CheckHeap();
+        private static Vector3 anchor;
+        private static bool anchored;
+        // The camera sets the anchor again once it is this far from it, and the parked checks are then due by the new one.
+        private const float AnchorReach = 16f;
+        // The isolated client can turn parking off to compare.
+        internal static bool ParkedChecks = true;
         // Owned members showing natively near a detail-level change or while a tree moves.
         private static readonly HashSet<Member> near = new HashSet<Member>();
         // The members showing natively that are clear of every change, followed within the frame budget until a crossfade
@@ -863,6 +963,8 @@ namespace WorldPerformance
             cells.Clear();
             active.Clear();
             checks.Clear();
+            parked.Clear();
+            anchored = false;
             near.Clear();
             foreach (var member in finishing) member.Finishing = -1;
             finishing.Clear();
@@ -2295,7 +2397,7 @@ namespace WorldPerformance
                 {
                     if (builds.Count > 0) using (new Timed(Applies)) Complete(position);
                     if (owning.Count > 0 || finishing.Count > 0) using (new Timed(Arrivals)) { OwnCompleted(position); CheckFinishing(position); }
-                    if (checks.Count > (pieces.Count + natural.Count) * 2 + 64) using (new Timed(DetailChecks)) DropVoidChecks();
+                    if (checks.Count + parked.Count > (pieces.Count + natural.Count) * 2 + 64) using (new Timed(DetailChecks)) DropVoidChecks();
                 }
                 if (removing.Count > 0) using (new Timed(Removals)) Forget();
                 using (new Timed(SkyPreparation)) PrepareSky();
@@ -2472,7 +2574,9 @@ namespace WorldPerformance
                         if (!known || entry.detail == index) membership[id] = (index, (known ? entry.levels : 0) | 1 << level);
                     }
                 }
-                details[index] = new Detail { Group = group, Thresholds = thresholds, Level = -2, Owned = true, Fades = fades };
+                bool descending = true;
+                for (int level = 1; level < thresholds.Length; level++) if (!(thresholds[level] <= thresholds[level - 1])) descending = false;
+                details[index] = new Detail { Group = group, Thresholds = thresholds, Descending = descending, Level = -2, Owned = true, Fades = fades };
                 Place(details[index]);
             }
             var merging = new bool[renderers.Length];
@@ -2611,7 +2715,46 @@ namespace WorldPerformance
             float far = level < 0 ? float.PositiveInfinity : scale / detail.Thresholds[level];
             if (level < 0) near = detail.Thresholds.Length == 0 ? 0f : scale / detail.Thresholds[detail.Thresholds.Length - 1];
             margin = Mathf.Min(distance - near, far - distance);
+            measuredLevel = level;
+            measuredScale = scale;
+            measuredNear = near;
+            measuredFar = far;
             return level < 0 ? -1 : Math.Max(level, detailMaximum);
+        }
+
+        // The last measured group's level before the maximum level applies, its scale and the distances of its changes.
+        private static int measuredLevel;
+        private static float measuredScale, measuredNear, measuredFar;
+
+        // Keeps a member's only group's level as Level just measured it, for the due checks that find it unchanged.
+        private static void KeepBand(Member member, Detail detail)
+        {
+            member.Banded = detail.Descending && member.Active.Count == 1;
+            if (!member.Banded) return;
+            var thresholds = detail.Thresholds;
+            int level = measuredLevel;
+            member.BandFades = detail.Fades;
+            member.BandReference = detail.Reference;
+            member.BandScale = measuredScale;
+            member.BandLower = level >= 0 ? thresholds[level] : float.NegativeInfinity;
+            member.BandUpper = level > 0 ? thresholds[level - 1] : level == 0 || thresholds.Length == 0 ? float.PositiveInfinity : thresholds[thresholds.Length - 1];
+            member.BandNear = measuredNear;
+            member.BandFar = measuredFar;
+        }
+
+        // A due check of an owned member drawing merged whose only group keeps its level, done as CheckLevels does it without
+        // reading the member's groups: the same screen share, level test, margin and next check.
+        private static bool CheckBand(Member member, Vector3 camera)
+        {
+            if (!member.Banded || !member.Owned || member.Away) return false;
+            float distance = Vector3.Distance(camera, member.BandReference);
+            float relative = member.BandScale / Mathf.Max(distance, .001f);
+            if (!(relative >= member.BandLower && relative < member.BandUpper)) return false;
+            float margin = Mathf.Min(distance - member.BandNear, member.BandFar - distance);
+            if (member.BandFades && !(margin >= DetailMargin)) return false;
+            evaluations++;
+            CheckAfter(member, member.BandFades ? margin - DetailMargin : margin - SwitchMargin);
+            return true;
         }
 
         // The level the orthographic sky depth camera selects for a group, with the maximum level read by the last detail-level
@@ -2665,26 +2808,90 @@ namespace WorldPerformance
             if (settings)
             {
                 checks.Clear();
+                parked.Clear();
                 foreach (var member in Members()) if (member.Owned) CheckLevels(member, position);
             }
-            while (checks.Count > 0 && checks[0].Due <= travelled)
+            if (!ParkedChecks && parked.Count > 0)
             {
-                var check = checks[0];
-                var last = checks[checks.Count - 1];
-                checks.RemoveAt(checks.Count - 1);
-                if (checks.Count > 0) SiftDown(0, last);
-                if (check.Stamp == check.Member.CheckStamp && !check.Member.Removed) CheckLevels(check.Member, position);
+                // Parked checks go back to waiting for the camera's travel.
+                parked.Keep(entry => { float moved = Vector3.Distance(position, entry.From); entry.Due = travelled + Math.Max(entry.Distance - moved, 0f); checks.Push(entry); return -1; });
+                anchored = false;
+            }
+            float fromAnchor = 0f;
+            if (ParkedChecks)
+            {
+                if (!anchored || parked.Count == 0) { anchor = position; anchored = true; }
+                fromAnchor = Vector3.Distance(position, anchor);
+                if (fromAnchor > AnchorReach)
+                {
+                    anchor = position;
+                    fromAnchor = 0f;
+                    parked.Keep(Reanchored);
+                    foreach (var member in pendingNow) CheckLevels(member, position);
+                    pendingNow.Clear();
+                }
+            }
+            while (checks.Count > 0 && checks.TopDue <= travelled)
+            {
+                var check = checks.Top;
+                bool valid = check.Stamp == check.Member.CheckStamp && !check.Member.Removed;
+                if (valid && ReplaceDueChecks) checks.Replacing = true;
+                else checks.Pop();
+                if (valid && !(ParkedChecks && Defer(check, position, fromAnchor))) Due(check.Member, position);
+                if (!checks.Replacing) continue;
+                checks.Replacing = false;
+                checks.Pop();
+            }
+            while (parked.Count > 0 && parked.TopDue <= fromAnchor)
+            {
+                var check = parked.Pop();
+                if (check.Stamp == check.Member.CheckStamp && !check.Member.Removed) Due(check.Member, position);
             }
         }
+
+        // The isolated client can turn these off to compare: a due check's replacement taking its place in the heap, and a
+        // member's kept level settling its due checks.
+        internal static bool ReplaceDueChecks = true, BandedChecks = true;
+
+        // Makes a member's due check.
+        private static void Due(Member member, Vector3 position)
+        {
+            if (!(BandedChecks && CheckBand(member, position))) CheckLevels(member, position);
+        }
+
+        // A check whose member the camera cannot yet have brought to a change waits, parked while the anchor bounds the
+        // camera's distance from where it was made.
+        private static bool Defer(Check check, Vector3 position, float fromAnchor)
+        {
+            if (Vector3.Distance(position, check.From) >= check.Distance) return false;
+            float key = check.Distance - Vector3.Distance(anchor, check.From);
+            if (!(key > fromAnchor)) return false;
+            check.Due = key;
+            parked.Push(check);
+            return true;
+        }
+
+        // A parked check's due distance from the new anchor, where the camera is; one the camera may already have brought to
+        // a change is made once the parked checks are ordered again.
+        private static double Reanchored(Check check)
+        {
+            if (check.Stamp != check.Member.CheckStamp || check.Member.Removed) return -1;
+            float key = check.Distance - Vector3.Distance(anchor, check.From);
+            if (key > 0f) return key;
+            pendingNow.Add(check.Member);
+            return -1;
+        }
+
+        private static readonly List<Member> pendingNow = new List<Member>();
 
         // Void detail-level checks are dropped within the frame's budget once they outnumber the members.
         private static void DropVoidChecks()
         {
-            int entries = checks.Count;
+            int entries = checks.Count + parked.Count;
             if (entries <= (pieces.Count + natural.Count) * 2 + 64 || !Admit(cleanupCost.Expected(entries))) return;
             var step = Step.Start();
-            checks.RemoveAll(check => check.Stamp != check.Member.CheckStamp || check.Member.Removed);
-            for (int index = checks.Count / 2 - 1; index >= 0; index--) SiftDown(index, checks[index]);
+            checks.Keep(check => check.Stamp != check.Member.CheckStamp || check.Member.Removed ? -1 : check.Due);
+            parked.Keep(check => check.Stamp != check.Member.CheckStamp || check.Member.Removed ? -1 : check.Due);
             step.Done(cleanupCost, entries);
         }
 
@@ -2708,6 +2915,7 @@ namespace WorldPerformance
             {
                 if (Level(detail, camera, out float margin) != detail.Level) changed = true;
                 closest = Mathf.Min(closest, margin);
+                KeepBand(member, detail);
             }
             if (!changed && closest >= DetailMargin) { CheckAfter(member, closest - DetailMargin); return; }
             Leave(member, "detail level");
@@ -2724,6 +2932,7 @@ namespace WorldPerformance
                 int level = Level(detail, camera, out float margin);
                 if (level != detail.Level) { detail.Level = level; changed = true; }
                 closest = Mathf.Min(closest, margin);
+                KeepBand(member, detail);
             }
             return closest;
         }
@@ -2811,31 +3020,8 @@ namespace WorldPerformance
         private static void CheckAfter(Member member, float distance)
         {
             if (float.IsPositiveInfinity(distance)) { member.CheckStamp++; return; }
-            var entry = new Check { Due = travelled + Math.Max(distance, .0001f), Member = member, Stamp = ++member.CheckStamp };
-            int index = checks.Count;
-            checks.Add(entry);
-            while (index > 0)
-            {
-                int parent = (index - 1) / 2;
-                if (checks[parent].Due <= entry.Due) break;
-                checks[index] = checks[parent];
-                index = parent;
-            }
-            checks[index] = entry;
-        }
-
-        private static void SiftDown(int index, Check entry)
-        {
-            while (true)
-            {
-                int child = index * 2 + 1;
-                if (child >= checks.Count) break;
-                if (child + 1 < checks.Count && checks[child + 1].Due < checks[child].Due) child++;
-                if (entry.Due <= checks[child].Due) break;
-                checks[index] = checks[child];
-                index = child;
-            }
-            checks[index] = entry;
+            distance = Math.Max(distance, .0001f);
+            checks.Push(new Check { Due = travelled + distance, Member = member, Stamp = ++member.CheckStamp, From = lastCamera, Distance = distance });
         }
 
         // Applies finished jobs within the frame's budget; each mesh goes live on its own, and the members it completes are
@@ -3081,6 +3267,7 @@ namespace WorldPerformance
             // Jobs started before this plan no longer hold the member, and its earlier detail-level checks are void.
             member.Version++;
             member.CheckStamp++;
+            member.Banded = false;
             member.Slots.Clear();
             member.Merged.Clear();
             member.Active.Clear();
