@@ -160,6 +160,7 @@ namespace WorldPerformance
                 Optional(typeof(ColoredCreatureCopies), patches => ColoredCreatureCopies.Initialize(patches, Plugin.Log));
                 Optional(typeof(FloatingWaterCache), FloatingWaterCache.Initialize);
                 Optional(typeof(LightFlickerAngles), LightFlickerAngles.Initialize);
+                Optional(typeof(PlainTextTags), PlainTextTags.Initialize);
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
             }
