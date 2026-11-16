@@ -179,6 +179,7 @@ namespace WorldPerformance
                 Optional(typeof(JotunnButtonTwins), patches => JotunnButtonTwins.Initialize(patches, Plugin.Log));
                 Optional(typeof(SailingShipUser), patches => SailingShipUser.Initialize(patches, Plugin.Log));
                 Optional(typeof(ConfigSyncFlush), patches => ConfigSyncFlush.Initialize(patches, Plugin.Log));
+                Optional(typeof(EpicLootLowHealth), patches => EpicLootLowHealth.Initialize(patches, Plugin.Log));
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
