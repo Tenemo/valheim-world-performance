@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using HarmonyLib;
 
 namespace WorldPerformance
@@ -57,6 +58,17 @@ namespace WorldPerformance
                 .Where(patch => patch.DeclaringType?.Namespace != typeof(PatchSets).Namespace && !known.Contains(patch.DeclaringType?.FullName + "." + patch.Name))
                 .Select(patch => patch.DeclaringType?.FullName + "." + patch.Name).ToList();
             return others.Count == 0 ? null : method.DeclaringType?.Name + "." + method.Name + " has other patches: " + string.Join(", ", others);
+        }
+    }
+
+    internal static class Bridges
+    {
+        // A delegate with this mod's parameter types, for calling into other mods' types it cannot name.
+        internal static T Make<T>(Type returns, Type[] parameters, Action<ILGenerator> body) where T : Delegate
+        {
+            var method = new DynamicMethod("WorldPerformance.Bridge", returns, parameters, typeof(Bridges), true);
+            body(method.GetILGenerator());
+            return (T)method.CreateDelegate(typeof(T));
         }
     }
 
