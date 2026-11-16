@@ -161,6 +161,8 @@ namespace WorldPerformance
                 Optional(typeof(FloatingWaterCache), FloatingWaterCache.Initialize);
                 Optional(typeof(LightFlickerAngles), LightFlickerAngles.Initialize);
                 Optional(typeof(PlainTextTags), PlainTextTags.Initialize);
+                Optional(typeof(StatusEffectParts), StatusEffectParts.Initialize);
+                Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
             }
