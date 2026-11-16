@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Reflection.Emit;
 using HarmonyLib;
+using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Jobs;
 
 namespace WorldPerformance
 {
@@ -12,7 +14,9 @@ namespace WorldPerformance
     // then unloads, is scanned in full, about twice a second while traveling: 5–7 ms over 14,000 instances in the hidden
     // client, more than half of it asking the engine for each instance's transform. A component's transform never changes, so the scan
     // walks the scene's instance table slot by slot, keeps each slot's transform until another instance takes the slot and
-    // asks the engine only for positions.
+    // reads the positions in a job on the worker threads, once for each pass of the check however many zones it asks about:
+    // 0.9 ms instead of 3.0 ms over 13,500 instances at a large base, and 1.5 instead of 5.4-5.9 ms on a busier machine. The
+    // game's own test then runs only for the instances standing in the zone asked about.
     [HarmonyPatch(typeof(ZoneSystem), "UpdateTTL")]
     internal static class ZoneExpiryChecks
     {
@@ -26,6 +30,29 @@ namespace WorldPerformance
         private static ZNetView[] views = new ZNetView[0];
         private static Transform[] transforms = new Transform[0];
         private static ZNetScene keptFor;
+        // The kept transforms of instances that are not distant, packed without gaps for a job that reads their positions on
+        // worker threads and writes each one's zone, once for each pass of the game's check however many zones it asks about,
+        // since nothing moves between them; the main thread then tests only the slots in the zone asked about, as the game
+        // does. Each kept transform's place in the packed array and the slot in each place. The isolated test client sets
+        // false to compare reading each position on the main thread.
+        internal static bool ParallelPositions = true;
+        private static bool keptParallel;
+        private static TransformAccessArray access;
+        private static NativeArray<int> zones;
+        private static int[] placeOf = new int[0], slotAt = new int[0];
+        // The game's check passes, counted by its start, and the pass and slot count the zones were read for.
+        private static int pass, zonesPass = -1, zonesSlots;
+        private const int NoZone = int.MinValue;
+
+        private struct ZonesOf : IJobParallelForTransform
+        {
+            [WriteOnly] public NativeArray<int> Zones;
+
+            public void Execute(int index, TransformAccess transform) =>
+                Zones[index] = transform.isValid ? Key(ZoneSystem.GetZone(transform.position)) : NoZone;
+        }
+
+        private static int Key(Vector2s zone) => zone.x << 16 | (ushort)zone.y;
 
         static ZoneExpiryChecks()
         {
@@ -67,11 +94,13 @@ namespace WorldPerformance
                 AccessTools.Method(typeof(ZoneExpiryChecks), nameof(HaveInstanceInSector)), 1,
                 "Valheim's zone expiry changed; expected one occupied-zone check.");
 
+        private static void Prefix() => pass++;
+
         private static bool HaveInstanceInSector(ZNetScene scene, Vector2s sector)
         {
             float now = Time.time;
             if (OccupiedUntil.TryGetValue(sector, out float until) && now < until) return true;
-            if (!Occupied(scene, sector))
+            if (!Occupied(scene, sector, true))
             {
                 OccupiedUntil.Remove(sector);
                 return false;
@@ -87,21 +116,30 @@ namespace WorldPerformance
         }
 
         // ZNetScene.HaveInstanceInSector with each slot's transform kept, starting again with each world's scene.
-        internal static bool Occupied(ZNetScene scene, Vector2s sector)
+        internal static bool Occupied(ZNetScene scene, Vector2s sector) => Occupied(scene, sector, false);
+
+        private static bool Occupied(ZNetScene scene, Vector2s sector, bool samePass)
         {
             if (instanceIn == null) return scene.HaveInstanceInSector(sector);
             var instances = instancesOf(scene);
             int slots = slotsOf(instances);
-            if (keptFor != scene)
+            // The two ways keep different slots, so a switch between them starts again.
+            if (keptFor != scene || keptParallel != ParallelPositions)
             {
                 Forget();
                 keptFor = scene;
+                keptParallel = ParallelPositions;
             }
             if (views.Length < slots)
             {
                 Array.Resize(ref views, slots + slots / 2);
                 Array.Resize(ref transforms, views.Length);
+                int kept = placeOf.Length;
+                Array.Resize(ref placeOf, views.Length);
+                for (int slot = kept; slot < placeOf.Length; slot++) placeOf[slot] = -1;
+                Array.Resize(ref slotAt, views.Length);
             }
+            if (ParallelPositions) return OccupiedInParallel(instances, slots, sector, samePass);
             for (int slot = 0; slot < slots; slot++)
             {
                 var view = instanceIn(instances, slot);
@@ -123,10 +161,71 @@ namespace WorldPerformance
             return false;
         }
 
+        // The same answer with the positions read by a job: every slot whose instance the game would find in the zone has a
+        // valid transform there, so it has the zone's key, and such a slot counts only if the game's own test holds for it.
+        private static bool OccupiedInParallel(Dictionary<ZDO, ZNetView> instances, int slots, Vector2s sector, bool samePass)
+        {
+            if (!samePass || zonesPass != pass || zonesSlots != slots)
+            {
+                if (!access.isCreated) access = new TransformAccessArray(views.Length);
+                for (int slot = 0; slot < slots; slot++)
+                {
+                    var view = instanceIn(instances, slot);
+                    if (ReferenceEquals(views[slot], view)) continue;
+                    // A slot whose instance is gone lets go of it, so nothing here keeps an unloaded object. A distant instance,
+                    // which the game's test passes over and only its prefab makes distant, keeps no transform for the job.
+                    if (placeOf[slot] >= 0) Unplace(slot);
+                    bool live = view;
+                    views[slot] = live ? view : null;
+                    transforms[slot] = live && !view.m_distant ? view.transform : null;
+                    if (transforms[slot] is null) continue;
+                    placeOf[slot] = access.length;
+                    slotAt[access.length] = slot;
+                    access.Add(transforms[slot]);
+                }
+                if (zones.Length < access.length)
+                {
+                    if (zones.IsCreated) zones.Dispose();
+                    zones = new NativeArray<int>(views.Length, Allocator.Persistent);
+                }
+                new ZonesOf { Zones = zones }.ScheduleReadOnly(access, 256).Complete();
+                zonesPass = samePass ? pass : -1;
+                zonesSlots = slots;
+            }
+            int key = Key(sector);
+            for (int place = 0; place < access.length; place++)
+            {
+                if (zones[place] != key) continue;
+                int slot = slotAt[place];
+                var view = views[slot];
+                if (view && !view.m_distant && ZoneSystem.GetZone(transforms[slot].position) == sector) return true;
+            }
+            return false;
+        }
+
+        // Takes a slot's transform out of the packed array; the last one moves into its place.
+        private static void Unplace(int slot)
+        {
+            int place = placeOf[slot], last = access.length - 1;
+            access.RemoveAtSwapBack(place);
+            if (place != last)
+            {
+                slotAt[place] = slotAt[last];
+                placeOf[slotAt[place]] = place;
+            }
+            placeOf[slot] = -1;
+        }
+
         private static void Forget()
         {
             Array.Clear(views, 0, views.Length);
             Array.Clear(transforms, 0, transforms.Length);
+            for (int slot = 0; slot < placeOf.Length; slot++) placeOf[slot] = -1;
+            if (access.isCreated) access.Dispose();
+            if (zones.IsCreated) zones.Dispose();
+            access = default;
+            zones = default;
+            zonesPass = -1;
             keptFor = null;
         }
 
