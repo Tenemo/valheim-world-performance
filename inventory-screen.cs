@@ -82,6 +82,8 @@ namespace WorldPerformance
     {
         private static ConfigEntry<bool> stars;
         private static ConfigEntryBase palette;
+        // Whether the palette colours bars: its value is not Disabled, compared without boxing it or naming it.
+        private static Func<bool> colouring;
         private static FieldInfo activeColor;
         private static Color[] colors;
         private static readonly AccessTools.FieldRef<InventoryGrid, Inventory> inventory = AccessTools.FieldRefAccess<InventoryGrid, Inventory>("m_inventory");
@@ -101,9 +103,22 @@ namespace WorldPerformance
             var bar = main.Assembly.GetType("BetterUI.Patches.DurabilityBar", true);
             activeColor = AccessTools.Field(bar, "activeColor");
             if (stars == null || palette == null || activeColor == null) throw new InvalidOperationException("BetterUI's inventory settings changed.");
+            colouring = (Func<bool>)AccessTools.Method(typeof(QualityAndDurabilityRedraws), nameof(Colouring)).MakeGenericMethod(palette.SettingType).Invoke(null, new object[] { palette });
             harmony.Patch(AccessTools.Method(typeof(InventoryGrid), "UpdateGui"), prefix: new HarmonyMethod(typeof(QualityAndDurabilityRedraws), nameof(Cover)),
                 transpiler: new HarmonyMethod(typeof(QualityAndDurabilityRedraws), nameof(WriteFinalState)));
             harmony.Patch(AccessTools.Method(bar, "UpdateColor", new[] { typeof(GuiBar), typeof(float) }), prefix: new HarmonyMethod(typeof(QualityAndDurabilityRedraws), nameof(Colour)));
+        }
+
+        // The value's name is Disabled exactly when the value is that member's and no other member shares it, as in BetterUI's
+        // palettes; otherwise the name is compared, as before.
+        private static Func<bool> Colouring<T>(ConfigEntryBase setting)
+        {
+            var entry = (ConfigEntry<T>)setting;
+            if (!typeof(T).IsEnum || !Enum.IsDefined(typeof(T), "Disabled")) return () => entry.BoxedValue.ToString() != "Disabled";
+            var disabled = (T)Enum.Parse(typeof(T), "Disabled");
+            if (Enum.GetNames(typeof(T)).Count(name => EqualityComparer<T>.Default.Equals((T)Enum.Parse(typeof(T), name), disabled)) != 1)
+                return () => entry.BoxedValue.ToString() != "Disabled";
+            return () => !EqualityComparer<T>.Default.Equals(entry.Value, disabled);
         }
 
         // BetterUI's postfix walks the grid's items in order and stops at the first one without a cell; it stars the
@@ -115,7 +130,7 @@ namespace WorldPerformance
             var items = inventory(__instance);
             // The game makes new cells when the grid's size changes; that frame stays as it is.
             if (!InventoryScreen.Lean || items == null || items.GetWidth() != width(__instance) || items.GetHeight() != height(__instance)) return;
-            bool star = stars.Value, colour = palette.BoxedValue.ToString() != "Disabled";
+            bool star = stars.Value, colour = colouring();
             if (!star && !colour) return;
             var cells = elements(__instance);
             int columns = items.GetWidth();
