@@ -7,8 +7,12 @@ namespace WorldPerformance
     // When the loaded area moves, Valheim destroys every instance that left it in the same pass: leaving the base at once
     // removes about 8,450 instances in one frame of 345-523 ms. A player's game now destroys at most 250 departed instances
     // a pass and leaves the rest for the next passes, which run up to 30 times a second, so that departure takes about a
-    // second. Each pass finds the departed instances again, so one that comes back before its turn simply stays. Teleports,
-    // respawns and the first load keep the native single pass behind the loading screen, and the dedicated server keeps it.
+    // second. Each pass finds the departed instances again, so one that comes back before its turn simply stays. Unity
+    // destroys them in the next frame, about 1 ms for every thousand objects in their hierarchies, and a location's scenery
+    // or a dungeon can hold thousands: while travelling, 250 instances carried up to 23,000 objects, a following frame of
+    // 16-32 ms each time the loaded area moved on. A pass therefore takes only instances that keep it within 2,000 objects,
+    // besides its first. Teleports, respawns and the first load keep the native single pass behind the loading
+    // screen, and the dedicated server keeps it.
     // Most passes find nothing departed. A record is marked created only as its instance joins the scene's table, and every
     // removal from the table, the game's and the pack's mods', first clears that mark through ZNetView.ResetZDO, so every
     // created record the pass marks has a loaded instance. When as many are marked as instances are loaded, every instance
@@ -19,6 +23,8 @@ namespace WorldPerformance
     {
         // The isolated test client sets 0 to compare the native single pass.
         internal static int PerPass = 250;
+        // The isolated test client sets 0 to leave the passes unbounded by their objects.
+        internal static int ObjectsPerPass = 2000;
         // The isolated test client sets false to compare walking the instances on every pass.
         internal static bool SkipFullPasses = true;
         internal static int Pending { get; private set; }
@@ -57,9 +63,17 @@ namespace WorldPerformance
                 Pending = 0;
                 return false;
             }
-            int count = 0;
+            int count = 0, objects = 0;
             foreach (var view in loaded.Values)
-                if (view.GetZDO().TempRemoveEarmark != mark && count++ < PerPass) departed.Add(view);
+            {
+                if (view.GetZDO().TempRemoveEarmark == mark) continue;
+                count++;
+                if (departed.Count >= PerPass) continue;
+                int size = view ? view.transform.hierarchyCount : 0;
+                if (ObjectsPerPass > 0 && departed.Count > 0 && objects + size > ObjectsPerPass) continue;
+                departed.Add(view);
+                objects += size;
+            }
             Pending = count - departed.Count;
             foreach (var view in departed)
             {
