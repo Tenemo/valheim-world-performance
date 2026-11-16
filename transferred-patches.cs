@@ -168,6 +168,7 @@ namespace WorldPerformance
                 Optional(typeof(CookingSlotKeys), CookingSlotKeys.Initialize);
                 Optional(typeof(PropertyNameHashes), PropertyNameHashes.Initialize);
                 Optional(typeof(HudNumberTexts), HudNumberTexts.Initialize);
+                Optional(typeof(InstanceCameraPosition), InstanceCameraPosition.Initialize);
                 Optional(typeof(ComfortStatusList), patches => ComfortStatusList.Initialize(patches, Plugin.Log));
                 Running = true;
                 Plugin.Log.LogInfo("Independent game performance fixes initialized" + (deferred.Count == 0 ? "." : "; retained Progression Fix implementations keep their existing owner."));
