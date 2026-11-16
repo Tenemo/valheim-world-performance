@@ -259,6 +259,7 @@ namespace WorldPerformance
             Guard(nameof(DeferredAssetUnload), DeferredAssetUnload.Start);
             Guard(nameof(SnappingRenderMeshes), SnappingRenderMeshes.Start);
             Guard(nameof(TerrainRebuilds), TerrainRebuilds.Start);
+            Guard(nameof(GrassGround), GrassGround.Start);
             Guard(nameof(StagedDistantTerrain), StagedDistantTerrain.Start);
             Guard(nameof(CollectionBallast), CollectionBallast.Start);
             Guard(nameof(BiomeBorderWarning), BiomeBorderWarning.Start);
@@ -383,6 +384,7 @@ namespace WorldPerformance
             DeferredAssetUnload.Stop();
             SnappingRenderMeshes.Stop();
             TerrainRebuilds.Stop();
+            GrassGround.Stop();
             StagedDistantTerrain.Stop();
             CollectionBallast.Stop();
             BiomeBorderWarning.Stop();
