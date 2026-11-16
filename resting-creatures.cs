@@ -67,6 +67,10 @@ namespace WorldPerformance
         // table never drops an entry while its creature lives, so the same creature finds the same ground again.
         private static Character lastCreature;
         private static Ground lastGround;
+        // The physics step's number, read once as the game's fixed updates start, where every creature's update runs; time
+        // stands still within them.
+        private static long stepNumber;
+        private static bool stepKnown;
         // A creature that has done nothing for SettleSteps runs its fixed update only every SpacedSteps-th step while its
         // body sleeps and its tilt is settled, with the skipped steps' time added; anything it does runs it at once.
         internal static int SpacedSteps = 4, SettleSteps = 25;
@@ -98,6 +102,8 @@ namespace WorldPerformance
                 patches.Patch(AccessTools.Method(type, "UpdateLava"), transpiler: new HarmonyMethod(typeof(RestingCreatures), nameof(TranspileLava)));
                 patches.Patch(AccessTools.Method(typeof(Humanoid), nameof(Humanoid.CustomFixedUpdate)), prefix: new HarmonyMethod(typeof(RestingCreatures), nameof(SpaceSteps)));
                 patches.Patch(AccessTools.Method(type, nameof(Character.SetHealth)), postfix: new HarmonyMethod(typeof(RestingCreatures), nameof(Stir)));
+                patches.Patch(AccessTools.Method(typeof(MonoUpdaters), "FixedUpdate"), prefix: new HarmonyMethod(typeof(RestingCreatures), nameof(Stepping)),
+                    finalizer: new HarmonyMethod(typeof(RestingCreatures), nameof(Stepped)));
             }
             catch (Exception error)
             {
@@ -114,6 +120,7 @@ namespace WorldPerformance
             if (!Running) return;
             Running = false;
             patches.UnpatchSelf();
+            stepKnown = false;
         }
 
         internal static string Report() => $"skipped writes {Skipped}, wakes {Wakes}, settled {Settled}, rays kept {RaysKept}, cast {RaysCast}, ground data kept {DataKept}, read {DataRead}, spaced skips {SpacedSkips}, spaced runs {SpacedRuns}, stirred {Stirred}, tilts held {TiltsHeld}";
@@ -160,6 +167,8 @@ namespace WorldPerformance
             if (attacks(creature) != null || effects(effectManagers(creature)).Count > 0 || creature.IsAttached()) return true;
             var mind = minds(creature);
             if (!mind || mind.HaveRider()) return true;
+            // Its view was found valid and owned above, and nothing since changed that.
+            if (Lookups) return false;
             var view = views(creature);
             return !view.IsValid() || !view.IsOwner();
         }
@@ -184,7 +193,17 @@ namespace WorldPerformance
 
         // Each sleeping body wakes in its own one of every WakeSteps steps, so that triggers reach it.
         private static bool WakeStep(Character character) =>
-            Waking && (uint)((long)(Time.fixedTimeAsDouble / Time.fixedDeltaTime + .5) + character.GetInstanceID()) % WakeSteps == 0;
+            Waking && (uint)((stepKnown ? stepNumber : StepNumber()) + character.GetInstanceID()) % WakeSteps == 0;
+
+        private static long StepNumber() => (long)(Time.fixedTimeAsDouble / Time.fixedDeltaTime + .5);
+
+        private static void Stepping()
+        {
+            stepNumber = StepNumber();
+            stepKnown = true;
+        }
+
+        private static void Stepped() => stepKnown = false;
 
         // A change of health, from a hit, a burn or healing, runs the creature's next steps in full.
         private static void Stir(Character __instance)
@@ -229,9 +248,9 @@ namespace WorldPerformance
         // force in the next step wakes it again.
         private static void Touched(Character __instance)
         {
-            if (!Sleeping || !Settling || __instance.IsPlayer()) return;
+            if (!Sleeping || !Settling || __instance.IsPlayer() || !__instance.IsOwner()) return;
             var body = bodies(__instance);
-            if (body.IsSleeping() || body.linearVelocity.sqrMagnitude >= StillSquared || !__instance.IsOwner()) return;
+            if (body.IsSleeping() || body.linearVelocity.sqrMagnitude >= StillSquared) return;
             Settled++;
             body.Sleep();
         }
