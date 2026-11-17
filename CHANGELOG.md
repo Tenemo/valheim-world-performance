@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.6
+
+- With Progression Fix, a Quick stack key or mouse button chosen in Settings, Keyboard & Mouse works again; since 1.0.4 only P did.
+
 ## 1.0.5
 
 - Saving your character with Steam Cloud on, every 10 minutes and when you log out, no longer freezes the game for 0.1-0.5 s.
