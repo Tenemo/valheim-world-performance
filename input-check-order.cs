@@ -17,7 +17,8 @@ namespace WorldPerformance
     //   slot without an ability, or without an activated ability bound to a button, does nothing. It now asks only when
     //   a slot could act.
     // - Quick Stack Store 1.4.16 checks a dozen windows before reading its seven keys, and AzuClock 1.1.1 five before its
-    //   clock key. Each now reads its keys first and checks the windows only when one is pressed.
+    //   clock key. Each now reads its keys first, with Progression Fix's quick stack control among Quick Stack Store's, and
+    //   checks the windows only when one is pressed.
     // Every check left out or moved only reads the game's state, as do the patches of the other mods on them, read once the
     // player is in the world: any other patch on them turns this off and fails mod-compatibility. Epic Loot's spirit animal patch
     // on Player.TakeInput clears its naming popup's flag after the popup closes, so while that flag is set the checks run
@@ -43,6 +44,7 @@ namespace WorldPerformance
         private static Func<KeyboardShortcut, bool> shortcutDown;
         private static AccessTools.FieldRef<ConfigEntry<KeyboardShortcut>>[] quickStackKeys;
         private static AccessTools.FieldRef<ConfigEntry<bool>> hardcodedController;
+        private const string PersonalQuickStackButton = "EpicLootProgressionFix.QuickStack";
         private static AccessTools.FieldRef<ConfigEntry<KeyboardShortcut>> clockKey;
         private static Func<bool, bool> clockIgnores;
         // 0 until the first call reads the patches, then 1 when the checks are reordered, -1 when they run as before.
@@ -257,7 +259,8 @@ namespace WorldPerformance
             Transpilers.CallInstead(instructions, instruction => instruction.operand is MethodInfo method && method.Name == "IgnoreKeyPresses",
                 AccessTools.Method(typeof(InputCheckOrder), nameof(QuickStackIgnored)), 1, "Quick Stack Store's keys changed.");
 
-        // On the keyboard, with none of its keys pressed this frame, Quick Stack Store has nothing to do.
+        // On the keyboard, with none of its keys or Progression Fix's quick stack control pressed this frame, Quick Stack Store
+        // has nothing to do.
         internal static bool QuickStackIgnored()
         {
             if (Ready() && !(ZInput.IsGamepadActive() && hardcodedController().Value))
@@ -268,6 +271,9 @@ namespace WorldPerformance
                     var main = key().Value.MainKey;
                     if (main != KeyCode.None && Input.GetKeyDown(main)) { pressed = true; break; }
                 }
+                // Progression Fix moves the quick stack key into the game's own controls, where it can be any key or mouse button.
+                if (!pressed && ZInput.instance != null && ZInput.instance.GetButtonDef(PersonalQuickStackButton) != null)
+                    pressed = ZInput.GetButtonDown(PersonalQuickStackButton);
                 if (!pressed) { Skipped++; return true; }
             }
             Asked++;
