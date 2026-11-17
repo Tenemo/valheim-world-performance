@@ -23,6 +23,8 @@ namespace WorldPerformance
     // on Player.TakeInput clears its naming popup's flag after the popup closes, so while that flag is set the checks run
     // as before; Equipment and Quick Slots' patches on the game's button reads keep a cache for buttons that share a key
     // with a quick slot, so while the controller modifier is one of those, Epic Loot's controller checks run as before.
+    // Progression Fix's chest search reads keys and buttons as not pressed while its field has the keyboard; a key that
+    // reads as not pressed makes these checks do nothing in either order.
     internal static class InputCheckOrder
     {
         internal static long Skipped, Asked;
@@ -73,7 +75,8 @@ namespace WorldPerformance
                 "EquipmentAndQuickSlots.PreventSimilarHotkeys+ZInput_TryGetButtonState_PreventSimilarHotkeys.Postfix",
                 "EquipmentAndQuickSlots.PreventSimilarHotkeys+ZInput_GetKey_PreventSimilarHotkeys.Prefix",
                 "EquipmentAndQuickSlots.PreventSimilarHotkeys+ZInput_TryGetKeyStateLowLevel_PreventSimilarHotkeys.Postfix",
-                "EquipmentAndQuickSlots.GamepadQuickSlots+ZInput_GetButton_Swallow.Postfix" });
+                "EquipmentAndQuickSlots.GamepadQuickSlots+ZInput_GetButton_Swallow.Postfix",
+                "EpicLootProgressionFix.ChestSearch+TypedKeysStayInField.Postfix", "EpicLootProgressionFix.ChestSearch+TypedButtonsStayInField.Postfix" });
             if (epicLoot) EpicLootAbilities(harmony, epicLootPlugin.Instance.GetType().Assembly);
             if (slots) QuickSlots(harmony, slotsPlugin.Instance.GetType().Assembly);
             if (quickStack) QuickStack(harmony, quickStackPlugin.Instance.GetType().Assembly);
