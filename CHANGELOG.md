@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5
+
+- Saving your character with Steam Cloud on, every 10 minutes and when you log out, no longer freezes the game for 0.1-0.5 s.
+- Big fights cost less: a floating damage number shows in about a fifth of the time, and an enemy's weakness hit effect starts in about half.
+- Finishing a material conversion at the enchanting table takes about a third less time in that frame.
+- Opening the build menu at a large base makes about 3 MB less garbage, so later frames stutter less.
+- Places full of rooted creatures, such as a Black Forest landing of tentaroots, take up to 0.4 ms less of each physics step.
+
 ## 1.0.4
 
 - Travelling past locations and dungeons and into large bases holds far fewer long frames. A location or dungeon you leave is let go at the next loading screen or open menu instead of freezing a frame for 35-52 ms, keeping up to 64 of them, about 100 MB more memory. Objects you leave behind are removed over several frames, so the worst of those frames fell from up to 41 ms to 15 ms.
