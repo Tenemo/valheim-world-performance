@@ -74,10 +74,16 @@ namespace WorldPerformance
         // A creature that has done nothing for SettleSteps runs its fixed update only every SpacedSteps-th step while its
         // body sleeps and its tilt is settled, with the skipped steps' time added; anything it does runs it at once.
         internal static int SpacedSteps = 4, SettleSteps = 25;
+        // Off keeps a creature with no speed busy while its AI holds a wander direction, as before; the isolated client switches
+        // it for paired measurements. The game turns a creature only while it is more than FacingDegrees off its direction, and
+        // a turn speed under StillTurnSpeed no longer shows in its animation.
+        internal static bool RootedIdle = true;
+        private const float FacingDegrees = 0.001f, StillTurnSpeed = 0.01f;
         // The squared change of the visual's rotation a step below which its tilt counts as settled: about a hundredth of a degree.
         private const float StillTurn = 1e-8f;
         internal static long Skipped, Wakes, Settled, RaysKept, RaysCast, DataKept, DataRead, SpacedSkips, SpacedRuns, Stirred, TiltsHeld;
         private static readonly AccessTools.FieldRef<Character, Vector3> moveDirs = AccessTools.FieldRefAccess<Character, Vector3>("m_moveDir");
+        private static readonly AccessTools.FieldRef<Character, float> currentTurns = AccessTools.FieldRefAccess<Character, float>("m_currentTurnVel");
         private static readonly AccessTools.FieldRef<Character, Vector3> pushForces = AccessTools.FieldRefAccess<Character, Vector3>("m_pushForce");
         private static readonly AccessTools.FieldRef<Character, Vector3> currentVelocities = AccessTools.FieldRefAccess<Character, Vector3>("m_currentVel");
         private static readonly AccessTools.FieldRef<Character, float> standUps = AccessTools.FieldRefAccess<Character, float>("m_standUp");
@@ -162,7 +168,7 @@ namespace WorldPerformance
                 var owner = views(creature);
                 if (!owner.IsValid() || !owner.IsOwner()) return true;
             }
-            if (creature.IsPlayer() || moveDirs(creature) != Vector3.zero || pushForces(creature) != Vector3.zero || standUps(creature) > 0f || liquidDepths(creature) > 0f) return true;
+            if (creature.IsPlayer() || moveDirs(creature) != Vector3.zero && !Rooted(creature) || pushForces(creature) != Vector3.zero || standUps(creature) > 0f || liquidDepths(creature) > 0f) return true;
             if (currentVelocities(creature).sqrMagnitude >= StillSquared || bodies(creature).linearVelocity.sqrMagnitude >= StillSquared) return true;
             if (attacks(creature) != null || effects(effectManagers(creature)).Count > 0 || creature.IsAttached()) return true;
             var mind = minds(creature);
@@ -171,6 +177,17 @@ namespace WorldPerformance
             if (Lookups) return false;
             var view = views(creature);
             return !view.IsValid() || !view.IsOwner();
+        }
+
+        // A creature with no walking, running or swimming speed, such as a tentaroot, keeps the direction its AI last chose to
+        // wander in, which it can never walk; while it already faces that way and its turn has died away, its fixed update
+        // neither moves nor turns it, so the direction alone does not keep it busy. A new direction it does not face runs it
+        // again at once.
+        private static bool Rooted(Character creature)
+        {
+            if (!RootedIdle || creature.m_speed > 0f || creature.m_walkSpeed > 0f || creature.m_runSpeed > 0f || creature.m_swimSpeed > 0f || creature.m_flying) return false;
+            if (Mathf.Abs(currentTurns(creature)) >= StillTurnSpeed) return false;
+            return Mathf.Abs(Utils.GetYawDeltaAngle(creature.transform.rotation, Quaternion.LookRotation(moveDirs(creature)))) <= FacingDegrees;
         }
 
         private static bool SpaceSteps(Humanoid __instance, ref float fixedDeltaTime)
