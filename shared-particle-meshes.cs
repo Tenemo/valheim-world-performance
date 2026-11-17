@@ -13,9 +13,10 @@ namespace WorldPerformance
     {
         // Copying only small meshes that many renderers draw keeps the copies to a few hundred tiny meshes.
         private const int SharedBy = 8, MostVertices = 1024;
-        // The meshes this feature replaced, so switching it off gives each renderer its own back.
-        private static readonly Dictionary<ParticleSystemRenderer, Mesh[]> replaced = new Dictionary<ParticleSystemRenderer, Mesh[]>(Identity<ParticleSystemRenderer>.Instance);
-        private static readonly List<Mesh> copies = new List<Mesh>();
+        // The renderers this feature gave copies, and each copy's original, so switching it off gives every renderer drawing
+        // a copy, prefab or live effect, the original back.
+        private static readonly HashSet<ParticleSystemRenderer> replaced = new HashSet<ParticleSystemRenderer>(Identity<ParticleSystemRenderer>.Instance);
+        private static readonly Dictionary<Mesh, Mesh> originals = new Dictionary<Mesh, Mesh>(Identity<Mesh>.Instance);
         private static ZNetScene scene;
         private static bool copying = true;
         internal static bool Running { get; private set; }
@@ -41,27 +42,44 @@ namespace WorldPerformance
         {
             if (!Running || !ZNetScene.instance || ZNetScene.instance == scene) return;
             scene = ZNetScene.instance;
+            ReleaseUnused();
             if (copying) CopyAll();
+        }
+
+        private static Mesh[] Meshes(ParticleSystemRenderer renderer)
+        {
+            var meshes = new Mesh[renderer.meshCount];
+            renderer.GetMeshes(meshes);
+            return meshes;
+        }
+
+        // A renderer with several meshes keeps how often it draws each.
+        private static void SetMeshes(ParticleSystemRenderer renderer, Mesh[] meshes)
+        {
+            var weights = new float[meshes.Length];
+            int weighted = renderer.GetMeshWeightings(weights);
+            renderer.SetMeshes(meshes);
+            if (weighted > 0) renderer.SetMeshWeightings(weights, weighted);
         }
 
         private static void CopyAll()
         {
             if (!Running) return;
             var renderers = Resources.FindObjectsOfTypeAll<ParticleSystemRenderer>()
-                .Where(renderer => renderer && renderer.renderMode == ParticleSystemRenderMode.Mesh && renderer.meshCount > 0 && !replaced.ContainsKey(renderer))
-                .Select(renderer => { var meshes = new Mesh[renderer.meshCount]; renderer.GetMeshes(meshes); return (Renderer: renderer, Meshes: meshes); }).ToList();
+                .Where(renderer => renderer && renderer.renderMode == ParticleSystemRenderMode.Mesh && renderer.meshCount > 0 && !replaced.Contains(renderer))
+                .Select(renderer => (Renderer: renderer, Meshes: Meshes(renderer))).ToList();
             var users = new Dictionary<Mesh, int>(Identity<Mesh>.Instance);
             foreach (var entry in renderers)
                 foreach (var mesh in entry.Meshes.Where(mesh => mesh).Distinct(Identity<Mesh>.Instance))
                     users[mesh] = users.TryGetValue(mesh, out int count) ? count + 1 : 1;
-            bool Shared(Mesh mesh) => mesh && mesh.isReadable && mesh.vertexCount <= MostVertices && users[mesh] >= SharedBy;
+            bool Shared(Mesh mesh) => mesh && mesh.isReadable && mesh.vertexCount <= MostVertices && users[mesh] >= SharedBy && !originals.ContainsKey(mesh);
             var made = new Dictionary<Mesh, Mesh>(Identity<Mesh>.Instance);
             foreach (var entry in renderers.Where(entry => entry.Meshes.Any(Shared)))
             {
                 made.Clear();
                 var own = entry.Meshes.Select(mesh => !Shared(mesh) ? mesh : made.TryGetValue(mesh, out var copy) ? copy : made[mesh] = Copy(mesh)).ToArray();
-                replaced.Add(entry.Renderer, entry.Meshes);
-                entry.Renderer.SetMeshes(own);
+                replaced.Add(entry.Renderer);
+                SetMeshes(entry.Renderer, own);
             }
         }
 
@@ -69,18 +87,42 @@ namespace WorldPerformance
         {
             var copy = Object.Instantiate(mesh);
             copy.name = mesh.name;
-            copies.Add(copy);
+            originals.Add(copy, mesh);
             return copy;
+        }
+
+        // A new world: renderers of the last one are gone, and copies nothing draws any more are let go.
+        private static void ReleaseUnused()
+        {
+            replaced.RemoveWhere(renderer => !renderer);
+            if (originals.Count == 0) return;
+            var drawn = new HashSet<Mesh>(Identity<Mesh>.Instance);
+            foreach (var renderer in Resources.FindObjectsOfTypeAll<ParticleSystemRenderer>())
+                if (renderer && renderer.meshCount > 0)
+                    foreach (var mesh in Meshes(renderer))
+                        if (mesh) drawn.Add(mesh);
+            foreach (var copy in originals.Keys.Where(copy => !drawn.Contains(copy)).ToList())
+            {
+                originals.Remove(copy);
+                if (copy) Object.Destroy(copy);
+            }
         }
 
         private static void RestoreAll()
         {
-            foreach (var entry in replaced)
-                if (entry.Key) entry.Key.SetMeshes(entry.Value);
+            foreach (var renderer in Resources.FindObjectsOfTypeAll<ParticleSystemRenderer>())
+            {
+                if (!renderer || renderer.meshCount == 0) continue;
+                var meshes = Meshes(renderer);
+                bool changed = false;
+                for (int index = 0; index < meshes.Length; index++)
+                    if (meshes[index] && originals.TryGetValue(meshes[index], out var original)) { meshes[index] = original; changed = true; }
+                if (changed) SetMeshes(renderer, meshes);
+            }
             replaced.Clear();
-            foreach (var copy in copies)
+            foreach (var copy in originals.Keys)
                 if (copy) Object.Destroy(copy);
-            copies.Clear();
+            originals.Clear();
         }
     }
 }
