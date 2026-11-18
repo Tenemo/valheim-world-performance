@@ -10,8 +10,9 @@ namespace WorldPerformance
 {
     // Epic Loot writes its bounty ledger with every world save, on the game's main thread; while Windows took a snapshot of the
     // disk, creating the file held up the server for 2.6 s. Epic Loot now writes the ledger into memory, and a background
-    // thread writes those bytes whole beside the old file before they take its place. Stopping the server and quitting wait
-    // for the last of them.
+    // thread writes those bytes whole beside the old file before they take its place. A write that fails is retried every
+    // second for 15 s, past the disk snapshots that held the server for up to 4.7 s, and then dropped with an error, so a
+    // ledger that can never be written does not hold up stopping, logging out or quitting. Those wait for the last write.
     internal static class BountyLedgerWrites
     {
         private const int DrainMilliseconds = 60000;
@@ -19,6 +20,9 @@ namespace WorldPerformance
         private static readonly Dictionary<string, byte[]> Waiting = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         private static Thread thread;
         private static readonly Dictionary<string, DateTime> retryAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        // When the waiting snapshot's first write failed.
+        private static readonly Dictionary<string, DateTime> failingSince = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        private static readonly TimeSpan GiveUpAfter = TimeSpan.FromSeconds(15);
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -59,7 +63,7 @@ namespace WorldPerformance
                 if (disposing && !handed)
                 {
                     handed = true;
-                    lock (Gate) { Waiting[path] = ToArray(); retryAt.Remove(path); Monitor.PulseAll(Gate); }
+                    lock (Gate) { Waiting[path] = ToArray(); retryAt.Remove(path); failingSince.Remove(path); Monitor.PulseAll(Gate); }
                 }
                 base.Dispose(disposing);
             }
@@ -91,6 +95,7 @@ namespace WorldPerformance
                     {
                         if (ReferenceEquals(Waiting[path], bytes)) Waiting.Remove(path);
                         retryAt.Remove(path);
+                        failingSince.Remove(path);
                         Monitor.PulseAll(Gate);
                     }
                 }
@@ -99,8 +104,22 @@ namespace WorldPerformance
                     lock (Gate)
                     {
                         if (!ReferenceEquals(Waiting[path], bytes)) continue;
-                        if (!retryAt.ContainsKey(path)) Plugin.Log.LogError("Retrying bounty ledger save (" + path + "): " + error.Message);
-                        retryAt[path] = DateTime.UtcNow.AddSeconds(1);
+                        var now = DateTime.UtcNow;
+                        if (!failingSince.TryGetValue(path, out var since))
+                        {
+                            failingSince[path] = since = now;
+                            Plugin.Log.LogError("Retrying bounty ledger save (" + path + "): " + error.Message);
+                        }
+                        if (now - since >= GiveUpAfter)
+                        {
+                            Plugin.Log.LogError("Bounty ledger save abandoned after " + GiveUpAfter.TotalSeconds + " s (" + path + "): " + error.Message);
+                            Waiting.Remove(path);
+                            retryAt.Remove(path);
+                            failingSince.Remove(path);
+                            Monitor.PulseAll(Gate);
+                            continue;
+                        }
+                        retryAt[path] = now.AddSeconds(1);
                     }
                 }
             }
