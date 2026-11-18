@@ -50,7 +50,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             ReleaseAll();
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             Running = false;
         }
 
@@ -68,8 +68,9 @@ namespace WorldPerformance
             if (held.Count > Most)
             {
                 Overflowed++;
-                ReleaseKept(held[0]);
+                var oldest = held[0];
                 held.RemoveAt(0);
+                ReleaseKept(oldest);
             }
             return false;
         }
@@ -81,10 +82,15 @@ namespace WorldPerformance
             ReleaseAll();
         }
 
+        // Each asset leaves the list before its release, so a release that fails is never made twice.
         private static void ReleaseAll()
         {
-            foreach (var asset in held) ReleaseKept(asset);
-            held.Clear();
+            while (held.Count > 0)
+            {
+                var asset = held[held.Count - 1];
+                held.RemoveAt(held.Count - 1);
+                ReleaseKept(asset);
+            }
         }
 
         private static void ReleaseKept(AssetID asset)

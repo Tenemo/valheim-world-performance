@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using BepInEx;
 using HarmonyLib;
 using UnityEngine;
@@ -10,7 +11,8 @@ namespace WorldPerformance
     // save folder and a world record that never passes the cache's version check, so every join generates the whole map
     // again on the main thread: 5.1 s of Tenemo's join on 2026-11-03. Clients now keep the game's own cache files under
     // BepInEx/cache, one folder per world identity, seed, generator version, game version and map size, and load them
-    // as the game loads a local world's map. Hosts and single-player worlds keep the game's own cache.
+    // as the game loads a local world's map, keeping the maps of the last three worlds joined. Hosts, single-player worlds
+    // and worlds another mod's patches shape keep the game's own cache.
     internal static class ClientMapCache
     {
         // The isolated test client sets false to compare a fresh generation.
@@ -37,9 +39,15 @@ namespace WorldPerformance
         {
             private static bool Prefix(Minimap __instance, int worldSeed, ref bool __result)
             {
-                if (!Caching || ZNet.instance == null || ZNet.instance.IsServer() || ZNet.World == null) return true;
+                if (!Caching || ZNet.instance == null || ZNet.instance.IsServer() || ZNet.World == null || WorldGenerationCache.ForeignOwners() != "") return true;
                 string directory = Folder(__instance);
-                try { Directory.CreateDirectory(directory); }
+                try
+                {
+                    Directory.CreateDirectory(directory);
+                    Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow);
+                    foreach (var old in new DirectoryInfo(Path.GetDirectoryName(directory)).GetDirectories().OrderByDescending(folder => folder.LastWriteTimeUtc).Skip(3))
+                        old.Delete(true);
+                }
                 catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is System.Security.SecurityException)
                 {
                     Plugin.Log.LogWarning("Generating the minimap without a disk cache: " + error.Message);

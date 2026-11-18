@@ -20,7 +20,8 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<ZoneSystem, SimulationDistance> simulation = AccessTools.FieldRefAccess<ZoneSystem, SimulationDistance>("m_simulationDistance");
         private static readonly AccessTools.FieldRef<ZoneSystem, Dictionary<Vector2s, List<ZDO>>> loading =
             AccessTools.FieldRefAccess<ZoneSystem, Dictionary<Vector2s, List<ZDO>>>("m_loadingObjectsInZones");
-        private static readonly List<(ZNetPeer peer, int id, Vector2s zone, float since)> waiting = new List<(ZNetPeer, int, Vector2s, float)>();
+        // Each request's peer, number, zone, and when it came by the real-time and game clocks.
+        private static readonly List<(ZNetPeer peer, int id, Vector2s zone, float since, float asked)> waiting = new List<(ZNetPeer, int, Vector2s, float, float)>();
         private static readonly List<ZDO> records = new List<ZDO>();
         private static readonly AccessTools.FieldRef<ZoneSystem, HashSet<Vector2s>> generated = AccessTools.FieldRefAccess<ZoneSystem, HashSet<Vector2s>>("m_generatedZones");
         private static readonly Func<object, ZDO, bool> shouldSend = Bridges.Make<Func<object, ZDO, bool>>(typeof(bool), new[] { typeof(object), typeof(ZDO) }, il =>
@@ -32,7 +33,8 @@ namespace WorldPerformance
             il.Emit(System.Reflection.Emit.OpCodes.Callvirt, AccessTools.Method(peer, "ShouldSend"));
             il.Emit(System.Reflection.Emit.OpCodes.Ret);
         });
-        private static int asked, answered, lastLoading, spawnAsked;
+        private static int asked, answered, spawnAsked, quietPasses;
+        private static bool busy;
         private static readonly AccessTools.FieldRef<Game, float> respawnWait = AccessTools.FieldRefAccess<Game, float>("m_respawnWait");
         private static readonly AccessTools.FieldRef<Game, bool> respawnAfterDeath = AccessTools.FieldRefAccess<Game, bool>("m_respawnAfterDeath");
         private static float nextCheck;
@@ -53,7 +55,7 @@ namespace WorldPerformance
         private static void Asked(ZNetPeer peer, int id, Vector3 position)
         {
             waiting.RemoveAll(entry => entry.peer == peer);
-            waiting.Add((peer, id, ZoneSystem.GetZone(position), Time.unscaledTime));
+            waiting.Add((peer, id, ZoneSystem.GetZone(position), Time.unscaledTime, Time.time));
         }
 
         // After the update's records went out, so that an answer follows them.
@@ -74,7 +76,7 @@ namespace WorldPerformance
                         foreach (var candidate in peers)
                             if (PeerConnections.Peer(candidate) == entry.peer) { updatePeer = candidate; break; }
                     if (updatePeer == null || Time.unscaledTime - entry.since > 60f) waiting.RemoveAt(index);
-                    else if (AllSent(__instance, updatePeer, entry.zone))
+                    else if (AllSent(__instance, updatePeer, entry.zone, entry.asked))
                     {
                         entry.peer.m_rpc.Invoke(Answer, entry.id);
                         waiting.RemoveAt(index);
@@ -83,7 +85,12 @@ namespace WorldPerformance
             }
         }
 
-        private static bool AllSent(ZDOMan manager, object updatePeer, Vector2s zone)
+        private static System.Reflection.FieldInfo sentRecords, sentTime;
+
+        // A record counts as sent once the peer holds its current revision, or one sent after the request: an owner's game
+        // rewrites records such as a burning fire's time every few seconds, and at a busy base one of them is nearly always
+        // waiting to go out, though the peer already has it as new as when it asked.
+        private static bool AllSent(ZDOMan manager, object updatePeer, Vector2s zone, float asked)
         {
             var zones = generated(ZoneSystem.instance);
             var setting = PeerConnections.Peer(updatePeer).m_simulationDistance;
@@ -97,8 +104,22 @@ namespace WorldPerformance
             records.Clear();
             manager.FindSectorObjects(zone, new SimulationDistance(near, 0, setting.IsClassic), records);
             bool sent = true;
+            System.Collections.IDictionary held = null;
             foreach (var record in records)
-                if (record.Type >= ZDO.ObjectType.Solid && shouldSend(updatePeer, record)) { sent = false; break; }
+            {
+                if (record.Type < ZDO.ObjectType.Solid || !shouldSend(updatePeer, record)) continue;
+                if (held == null)
+                {
+                    if (sentRecords == null)
+                    {
+                        sentRecords = AccessTools.Field(updatePeer.GetType(), "m_zdos");
+                        sentTime = AccessTools.Field(AccessTools.Inner(updatePeer.GetType(), "PeerZDOInfo"), "m_syncTime");
+                    }
+                    held = (System.Collections.IDictionary)sentRecords.GetValue(updatePeer);
+                }
+                var info = held[record.m_uid];
+                if (info == null || (float)sentTime.GetValue(info) < asked) { sent = false; break; }
+            }
             records.Clear();
             return sent;
         }
@@ -113,17 +134,31 @@ namespace WorldPerformance
             }
         }
 
-        // The last frame an object was created or a zone finished loading, such as a dungeon placing its rooms.
+        // The game creates the objects around the player in passes 30 times a second, up to 100 a pass behind the loading
+        // screen; a pass over the loaded area that created nothing, with no zone finishing its loading, such as a dungeon
+        // placing its rooms, means everything there exists. A record whose prefab is missing creates nothing.
+        internal static bool Quiet => quietPasses > 0;
+
         [HarmonyPatch(typeof(ZNetScene), "CreateObject")]
         private static class Created
         {
-            private static void Postfix() => lastLoading = Time.frameCount;
+            private static void Postfix(GameObject __result) { if (__result != null) busy = true; }
         }
 
         [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.UnsetLoadingInZone))]
         private static class Loaded
         {
-            private static void Postfix() => lastLoading = Time.frameCount;
+            private static void Postfix() => busy = true;
+        }
+
+        [HarmonyPatch(typeof(ZNetScene), "CreateDestroyObjects")]
+        private static class Pass
+        {
+            private static void Postfix()
+            {
+                quietPasses = busy || ZoneSystem.instance == null || !ZoneSystem.instance.IsActiveAreaLoaded() ? 0 : quietPasses + 1;
+                busy = false;
+            }
         }
 
         [HarmonyPatch(typeof(Player), "UpdateTeleport")]
@@ -133,7 +168,7 @@ namespace WorldPerformance
             private static void Prefix(Player __instance, bool ___m_teleporting, bool ___m_distantTeleport, ref float ___m_teleportTimer, Vector3 ___m_teleportTargetPos)
             {
                 if (Confirming && ___m_teleporting && ___m_distantTeleport && asked != 0 && answered == asked && ___m_teleportTimer > 2f && ___m_teleportTimer < 8f &&
-                    __instance == Player.m_localPlayer && Time.frameCount - lastLoading > 2 && ZoneSystem.instance.IsActiveAreaLoaded() && Settled(___m_teleportTargetPos) &&
+                    __instance == Player.m_localPlayer && Quiet && ZoneSystem.instance.IsActiveAreaLoaded() && Settled(___m_teleportTargetPos) &&
                     ZNetScene.instance.IsAreaReady(___m_teleportTargetPos))
                     ___m_teleportTimer = 8f;
             }
@@ -164,7 +199,7 @@ namespace WorldPerformance
                     server.m_rpc.Invoke(Request, spawnAsked = ++asked, point);
                     return;
                 }
-                if (spawnAsked != 0 && answered == spawnAsked && wait > 2f && wait < __instance.m_respawnLoadDuration && Time.frameCount - lastLoading > 2 &&
+                if (spawnAsked != 0 && answered == spawnAsked && wait > 2f && wait < __instance.m_respawnLoadDuration && Quiet &&
                     ZoneSystem.instance.IsActiveAreaLoaded() && Settled(point) && ZNetScene.instance.IsAreaReady(point))
                     respawnWait(__instance) = __instance.m_respawnLoadDuration;
             }
