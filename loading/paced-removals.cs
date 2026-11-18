@@ -21,6 +21,11 @@ namespace WorldPerformance
     // created record the pass marks has a loaded instance. When as many are marked as instances are loaded, every instance
     // stays and the pass skips its walk over them, 0.3-0.6 ms at a large base; an instance whose record lost its mark could
     // only make the count fall short, and the walk runs.
+    // An instance destroyed without the scene, by a mod or with an object it was attached to, used to keep its entry while
+    // its record stayed in range: the scene counted that record as created and never made it again, and ZNetScene.IsAreaReady
+    // stayed false around it, so a short teleport there, as through a dungeon door, held its loading screen until the player
+    // left the world. As it is destroyed, its entry now leaves the table the way the scene's own removal takes one, so a
+    // record still in range is made again, and the log names its prefab once a session.
     [HarmonyPatch(typeof(ZNetScene), "RemoveObjects")]
     internal static class PacedRemovals
     {
@@ -105,6 +110,29 @@ namespace WorldPerformance
         private static void Release(ZDO data)
         {
             if (!data.Persistent && data.IsOwner()) ZDOMan.instance.DestroyZDO(data);
+        }
+
+        [HarmonyPatch(typeof(ZNetView), "OnDestroy")]
+        private static class DestroyedOutside
+        {
+            private static readonly HashSet<int> reported = new HashSet<int>();
+
+            // The scene's own removals and its shutdown clear the record first, so only an instance destroyed without the
+            // scene still holds one here.
+            private static void Prefix(ZNetView __instance)
+            {
+                var data = __instance.GetZDO();
+                var scene = ZNetScene.instance;
+                if (data == null || scene == null || ZDOMan.instance == null) return;
+                var loaded = instances(scene);
+                if (!loaded.TryGetValue(data, out var view) || !ReferenceEquals(view, __instance)) return;
+                loaded.Remove(data);
+                data.Created = false;
+                int prefab = data.GetPrefab();
+                Release(data);
+                if (reported.Add(prefab))
+                    Plugin.Log.LogWarning((scene.GetPrefab(prefab)?.name ?? __instance.name) + " was destroyed without the scene; its entry left the scene's table.");
+            }
         }
     }
 }
