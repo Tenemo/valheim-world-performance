@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.7
+
+- An object removed by another mod, or together with something it was attached to, no longer stops the world around you from unloading for the rest of the session; before, everything you passed stayed loaded and frames grew up to three times longer.
+- A short teleport beside such an object, as through a dungeon door, no longer keeps its loading screen up until you leave the world.
+- With `[Network] Connection log` on, the server also records each boss altar offering in `altars.csv` and which player's game created each boss in `bosses.csv`.
+
 ## 1.0.6
 
 - With Progression Fix, a Quick stack key or mouse button chosen in Settings, Keyboard & Mouse works again; since 1.0.4 only P did.

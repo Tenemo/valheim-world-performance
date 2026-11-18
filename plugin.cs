@@ -38,7 +38,7 @@ namespace WorldPerformance
     public sealed partial class Plugin : BaseUnityPlugin
     {
         public const string Id = "tenemo.WorldPerformance";
-        public const string Version = "1.0.6";
+        public const string Version = "1.0.7";
         // Contract 1: call on the startup thread, do not execute methods with pending patches inside the scope,
         // and dispose before using them. Disposal completes all pending wrappers, including after an exception.
         public static IDisposable BeginStartupPatchBatch(int contractVersion) => RepeatedPatchRebuilds.Begin(contractVersion);
