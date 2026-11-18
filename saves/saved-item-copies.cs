@@ -129,10 +129,13 @@ namespace WorldPerformance
             if (prefab.activeSelf)
             {
                 data.m_dropPrefab = ObjectDB.instance.GetItemPrefab(Utils.GetPrefabName(prefab.name + "(Clone)"));
-                // A failing wake postfix is logged and the load goes on, as Unity does for the copy's wake.
+                // A failing wake postfix is logged and the load goes on, as Unity does for the copy's wake; the postfixes after
+                // it are skipped, as they are in the native wake.
                 foreach (var addition in wake)
+                {
                     try { addition(data); }
-                    catch (Exception error) { Debug.LogException(error); }
+                    catch (Exception error) { Debug.LogException(error); break; }
+                }
             }
             // The rest of the game's load, without the copy's object.
             data.m_stack = Mathf.Min(stack, data.m_shared.m_maxStackSize);
