@@ -39,7 +39,14 @@ namespace WorldPerformance
             {
                 if (!Caching || ZNet.instance == null || ZNet.instance.IsServer() || ZNet.World == null) return true;
                 string directory = Folder(__instance);
-                Directory.CreateDirectory(directory);
+                try { Directory.CreateDirectory(directory); }
+                catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is System.Security.SecurityException)
+                {
+                    Plugin.Log.LogWarning("Generating the minimap without a disk cache: " + error.Message);
+                    Generated++;
+                    __result = false;
+                    return false;
+                }
                 // The game's own generation writes its cache files to these paths.
                 saveDirectory(__instance) = directory;
                 maskPath(__instance) = directory + "/cacheMinimapMask";

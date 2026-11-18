@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using BepInEx.Logging;
 using HarmonyLib;
@@ -65,7 +66,7 @@ namespace WorldPerformance
             station = AccessTools.StaticFieldRefAccess<string>(Field(cache, "CachedStationName"));
             rules = AccessTools.StaticFieldRefAccess<Dictionary<string, Dictionary<string, List<string>>>>(Field(main, "yamlData"));
             harmony.Patch(memo, prefix: new HarmonyMethod(typeof(CraftyBoxesCounts), nameof(Usable)));
-            harmony.Patch(search.MakeGenericMethod(typeof(Component)), postfix: new HarmonyMethod(typeof(CraftyBoxesCounts), nameof(Searched)));
+            harmony.Patch(search.MakeGenericMethod(typeof(Component)), transpiler: new HarmonyMethod(typeof(CraftyBoxesCounts), nameof(OnRebuild)));
             harmony.Patch(AccessTools.Method(typeof(Container), "Save"), postfix: new HarmonyMethod(typeof(CraftyBoxesCounts), nameof(Changed)));
             harmony.Patch(AccessTools.Method(typeof(InventoryGui), "DoCrafting"), prefix: new HarmonyMethod(typeof(CraftyBoxesCounts), nameof(Changed)));
             // A reloaded rules file replaces the rules, then fills the item groups they name in place.
@@ -77,7 +78,21 @@ namespace WorldPerformance
 
         private static void Changed() => generation++;
 
-        // After every search: a list holding other chests, or the same chests in another order, counts afresh. Its chests'
+        private static IEnumerable<CodeInstruction> OnRebuild(IEnumerable<CodeInstruction> instructions, MethodBase original)
+        {
+            var invalidate = AccessTools.Method(original.DeclaringType, "InvalidateCounts");
+            int matches = 0;
+            foreach (var instruction in instructions)
+            {
+                yield return instruction;
+                if (!instruction.Calls(invalidate)) continue;
+                matches++;
+                yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(CraftyBoxesCounts), nameof(Searched)));
+            }
+            if (matches != 1) throw new InvalidOperationException("AzuCraftyBoxes' nearby chest rebuild changed.");
+        }
+
+        // After rebuilding the nearby list: a list holding other chests, or the same chests in another order, counts afresh. Its chests'
         // inventories report their changes from then on.
         private static void Searched()
         {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace WorldPerformance
@@ -39,6 +40,7 @@ namespace WorldPerformance
         {
             if (!Running || !ZNetScene.instance || ZNetScene.instance == scene) return;
             scene = ZNetScene.instance;
+            foreach (var renderer in removed.Keys.Where(renderer => !renderer).ToArray()) removed.Remove(renderer);
             if (removing) RemoveAll();
         }
 

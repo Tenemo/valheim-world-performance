@@ -26,7 +26,7 @@ namespace WorldPerformance
             running = true;
         }
 
-        private static int Players => ZNet.instance == null ? 0 : ZNet.instance.GetConnectedPeers().Count;
+        private static int Players => ZNet.instance == null ? 0 : ZNet.instance.GetPeers().Count;
 
         private static bool Check()
         {

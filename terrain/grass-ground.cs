@@ -179,6 +179,7 @@ namespace WorldPerformance
             if (Math.Abs(det) < 1e-12) return false;
             double tx = local.x - (double)v0.x, ty = local.y - (double)v0.y, tz = local.z - (double)v0.z;
             double t = (bx * (ty * az - tz * ay) + by * (tz * ax - tx * az) + bz * (tx * ay - ty * ax)) / det;
+            if (!(t >= 0 && t <= 1000)) return false;
             Vector3 e1 = v1 - v0, e2 = v2 - v0;
             var face = Vector3.Cross(e1, e2);
             if (face.y < 0f) face = -face;

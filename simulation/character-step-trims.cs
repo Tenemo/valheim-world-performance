@@ -86,7 +86,8 @@ namespace WorldPerformance
         // Character.UpdateBodyFriction, writing each value only where the material holds another.
         private static bool BodyFriction(Character __instance)
         {
-            if (!Ready(ref frictionReady, friction)) return true;
+            if (frictionReady == 0) Ready(ref frictionReady, friction);
+            if (frictionReady < 0) return true;
             var character = __instance;
             var material = collider(character).material;
             float value;
