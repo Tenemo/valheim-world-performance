@@ -16,6 +16,7 @@ namespace WorldPerformance
         private static string arrows;
         private static ConfigEntryBase clockString, fontName, osFont;
         private static bool done;
+        private static float nextSearch;
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -38,7 +39,10 @@ namespace WorldPerformance
             string text = (string)clockString.BoxedValue;
             if (osFont.BoxedValue.ToString() == "On" || (text.IndexOf("{wind}", StringComparison.OrdinalIgnoreCase) < 0
                 && text.IndexOf("{windforecast}", StringComparison.OrdinalIgnoreCase) < 0)) { done = true; return; }
-            // The same lookup AzuClock makes; the font may load later in this loading screen.
+            // The same lookup AzuClock makes; the font may load later in this loading screen, so it is looked for again, at most
+            // once a second, since a name that is no game font is never found and AzuClock falls back to its own font.
+            if (Time.realtimeSinceStartup < nextSearch) return;
+            nextSearch = Time.realtimeSinceStartup + 1f;
             string name = (string)fontName.BoxedValue;
             var font = Resources.FindObjectsOfTypeAll<Font>().FirstOrDefault(candidate => candidate.name == name);
             if (!font) return;

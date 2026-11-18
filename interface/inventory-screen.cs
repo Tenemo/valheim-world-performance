@@ -46,7 +46,10 @@ namespace WorldPerformance
                 postfix: new HarmonyMethod(typeof(MagicBackgroundRedraws), nameof(Finish)));
         }
 
-        private static void Begin() { cleared.Clear(); drawn.Clear(); }
+        // Only a grid's own update counts: the hotbar draws the same backgrounds every frame while the inventory is closed.
+        private static bool updating;
+
+        private static void Begin() { cleared.Clear(); drawn.Clear(); updating = true; }
 
         // Epic Loot hides both backgrounds of every cell here; the cells whose item does not draw them again are hidden
         // when the grid's update ends instead.
@@ -60,14 +63,16 @@ namespace WorldPerformance
 
         private static void Drawn(GameObject slotRoot, bool __result)
         {
-            if (__result && slotRoot) drawn.Add(slotRoot);
+            if (updating && __result && slotRoot) drawn.Add(slotRoot);
         }
 
         private static void Finish()
         {
             foreach (var element in cleared)
                 if (element && !drawn.Contains(element.gameObject)) { Hide(element.transform, "magicItem"); Hide(element.transform, "setItem"); }
-            Begin();
+            cleared.Clear();
+            drawn.Clear();
+            updating = false;
         }
 
         private static void Hide(Transform cell, string name)
