@@ -7,7 +7,10 @@ namespace WorldPerformance
     // When the loaded area moves, Valheim destroys every instance that left it in the same pass: leaving the base at once
     // removes about 8,450 instances in one frame of 345-523 ms. A player's game now destroys at most 250 departed instances
     // a pass and leaves the rest for the next passes, which run up to 30 times a second, so that departure takes about a
-    // second. Each pass finds the departed instances again, so one that comes back before its turn simply stays. Unity
+    // second. Each pass finds the departed instances again, so one that comes back before its turn simply stays. An
+    // instance can be gone before its turn, destroyed with a parent an earlier pass removed or by a mod that bypassed the
+    // scene; its entry leaves the table without it, and every departed entry leaves before its instance is touched, so
+    // one such instance can no longer make every later pass throw and stop all removals for the rest of the session. Unity
     // destroys them in the next frame, about 1 ms for every thousand objects in their hierarchies, and a location's scenery
     // or a dungeon can hold thousands: while travelling, 250 instances carried up to 23,000 objects, a following frame of
     // 16-32 ms each time the loaded area moved on. A pass therefore takes only instances that keep it within 2,000 objects,
@@ -30,6 +33,7 @@ namespace WorldPerformance
         internal static int Pending { get; private set; }
         private static readonly AccessTools.FieldRef<ZNetScene, Dictionary<ZDO, ZNetView>> instances = AccessTools.FieldRefAccess<ZNetScene, Dictionary<ZDO, ZNetView>>("m_instances");
         private static readonly AccessTools.FieldRef<ZNetScene, List<ZNetView>> removed = AccessTools.FieldRefAccess<ZNetScene, List<ZNetView>>("m_tempRemoved");
+        private static readonly List<ZDO> departedRecords = new List<ZDO>(), gone = new List<ZDO>();
 
         // Last, so other mods' prefixes have added what they keep to the lists.
         [HarmonyPriority(Priority.Last)]
@@ -64,26 +68,43 @@ namespace WorldPerformance
                 return false;
             }
             int count = 0, objects = 0;
-            foreach (var view in loaded.Values)
+            departedRecords.Clear();
+            gone.Clear();
+            foreach (var entry in loaded)
             {
-                if (view.GetZDO().TempRemoveEarmark == mark) continue;
+                if (entry.Key.TempRemoveEarmark == mark) continue;
+                var view = entry.Value;
+                // Its ZNetView.OnDestroy has already taken it out of the spatial renderer, which reads the departed list.
+                if (!view) { gone.Add(entry.Key); continue; }
                 count++;
                 if (departed.Count >= PerPass) continue;
-                int size = view ? view.transform.hierarchyCount : 0;
+                int size = view.transform.hierarchyCount;
                 if (ObjectsPerPass > 0 && departed.Count > 0 && objects + size > ObjectsPerPass) continue;
                 departed.Add(view);
+                departedRecords.Add(entry.Key);
                 objects += size;
             }
             Pending = count - departed.Count;
-            foreach (var view in departed)
+            foreach (var data in gone)
             {
-                var data = view.GetZDO();
-                view.ResetZDO();
-                Object.Destroy(view.gameObject);
-                if (!data.Persistent && data.IsOwner()) ZDOMan.instance.DestroyZDO(data);
                 loaded.Remove(data);
+                data.Created = false;
+                Release(data);
+            }
+            for (int i = 0; i < departed.Count; i++)
+            {
+                var data = departedRecords[i];
+                loaded.Remove(data);
+                departed[i].ResetZDO();
+                Object.Destroy(departed[i].gameObject);
+                Release(data);
             }
             return false;
+        }
+
+        private static void Release(ZDO data)
+        {
+            if (!data.Persistent && data.IsOwner()) ZDOMan.instance.DestroyZDO(data);
         }
     }
 }
