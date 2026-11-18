@@ -31,10 +31,57 @@ namespace WorldPerformance
         private static int request;
         private static bool failed, reportedUnmeasured;
 
-        internal static void Initialize()
+        // A boss altar's offering goes from the offering player's game through the server to the game that owns the altar,
+        // which starts the boss's countdown and answers; the server passes these on, or drops one silently when the owner is
+        // not a connected player. altars.csv records each with whom it went between, so a late or missing boss names the game
+        // that ran its countdown.
+        private static readonly Dictionary<int, string> altarRequests = new Dictionary<int, string>
+        {
+            ["RPC_SpawnBoss".GetStableHashCode()] = "offer",
+            ["RPC_BossSpawnInitiated".GetStableHashCode()] = "accepted",
+            ["RPC_RemoveBossSpawnInventoryItems".GetStableHashCode()] = "items taken",
+        };
+
+        internal static void Initialize(PerformancePatches patches)
         {
             PeerConnections.Initialize();
             objects = AccessTools.FieldRefAccess<ZDOMan, Dictionary<ZDOID, ZDO>>("m_objectsByID");
+            patches.Patch(AccessTools.Method(typeof(ZRoutedRpc), "RouteRPC"), prefix: new HarmonyMethod(typeof(ConnectionLog), nameof(Routed)) { priority = Priority.First });
+            patches.Patch(AccessTools.Method(typeof(ZRoutedRpc), "HandleRoutedRPC"), prefix: new HarmonyMethod(typeof(ConnectionLog), nameof(Handled)) { priority = Priority.First });
+        }
+
+        private static void Routed(ZRoutedRpc.RoutedRPCData __0) => WriteAltar(__0, false);
+        private static void Handled(ZRoutedRpc.RoutedRPCData __0) => WriteAltar(__0, true);
+
+        private static void WriteAltar(ZRoutedRpc.RoutedRPCData data, bool toServer)
+        {
+            if (data == null || !altarRequests.TryGetValue(data.m_methodHash, out string request) || failed || objects == null ||
+                !Plugin.ConnectionLogging.Value || ZNet.instance == null || !ZNet.instance.IsDedicated() || ZDOMan.instance == null) return;
+            try
+            {
+                Open();
+                var altar = data.m_targetZDO.IsNone() ? null : ZDOMan.instance.GetZDO(data.m_targetZDO);
+                var target = ZNet.instance.GetPeer(data.m_targetPeerID);
+                // The server has no copy of an altar, so a request addressed to it goes no further.
+                string delivery = toServer ? "kept by the server" : target == null ? "dropped, no such player" : target.IsReady() ? "passed on" : "dropped, not ready";
+                var zone = altar == null ? default : ZoneSystem.GetZone(altar.GetPosition());
+                rows.Length = 0;
+                rows.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture))
+                    .Append(',').Append(Quoted(request))
+                    .Append(',').Append(Quoted(Name(data.m_senderPeerID)))
+                    .Append(',').Append(Quoted(Name(data.m_targetPeerID)))
+                    .Append(',').Append(Quoted(delivery))
+                    .Append(',').Append(Quoted(altar == null ? "" : Name(altar.GetOwner())))
+                    .Append(',').Append(altar == null ? "" : Count(zone.x))
+                    .Append(',').Append(altar == null ? "" : Count(zone.y)).Append('\n');
+                File.AppendAllText(Path.Combine(folder, "altars.csv"), rows.ToString());
+                rows.Length = 0;
+            }
+            catch (Exception error)
+            {
+                failed = true;
+                Plugin.Log.LogError("The connection log stopped: " + error.GetBaseException().Message);
+            }
         }
 
         internal static void LateUpdate()
@@ -57,19 +104,23 @@ namespace WorldPerformance
             frames.Clear();
         }
 
+        private static void Open()
+        {
+            if (folder != null) return;
+            folder = Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), "network-log",
+                DateTime.Now.ToString("yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, "connections.csv"),
+                "time,players,frames,frame_mean_ms,frame_p95_ms,frame_max_ms,objects,player,delay_ms,ping_ms,quality_local,quality_remote,out_kib_s,in_kib_s,send_rate_kib_s,queued_bytes,queue_ms,creatures,bosses,zone_x,zone_z," + FrameReports.Columns + "\n");
+            File.WriteAllText(Path.Combine(folder, "bosses.csv"), "time,boss,owner,creator,distance_m\n");
+            File.WriteAllText(Path.Combine(folder, "altars.csv"), "time,request,sender,target,delivery,altar_owner,zone_x,zone_z\n");
+            File.WriteAllText(Path.Combine(folder, "players.csv"), "time,player," + FrameReports.MachineColumns + "\n");
+            Plugin.Log.LogInfo("The connection log is in " + folder + ".");
+        }
+
         private static void Write(IList peers)
         {
-            if (folder == null)
-            {
-                folder = Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), "network-log",
-                    DateTime.Now.ToString("yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture));
-                Directory.CreateDirectory(folder);
-                File.WriteAllText(Path.Combine(folder, "connections.csv"),
-                    "time,players,frames,frame_mean_ms,frame_p95_ms,frame_max_ms,objects,player,delay_ms,ping_ms,quality_local,quality_remote,out_kib_s,in_kib_s,send_rate_kib_s,queued_bytes,queue_ms,creatures,bosses,zone_x,zone_z," + FrameReports.Columns + "\n");
-                File.WriteAllText(Path.Combine(folder, "bosses.csv"), "time,boss,owner,distance_m\n");
-                File.WriteAllText(Path.Combine(folder, "players.csv"), "time,player," + FrameReports.MachineColumns + "\n");
-                Plugin.Log.LogInfo("The connection log is in " + folder + ".");
-            }
+            Open();
             string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
             frames.Sort();
             string server = string.Join(",", new[]
@@ -115,7 +166,9 @@ namespace WorldPerformance
                 long owner = data.GetOwner();
                 var peer = ZNet.instance.GetPeer(owner);
                 float distance = peer == null ? -1f : Vector3.Distance(peer.GetRefPos(), data.GetPosition());
+                // A record's ID carries the session of the game that created it, which stays when its owner changes.
                 rows.Append(time).Append(',').Append(Quoted(ZNetScene.instance.GetPrefab(data.GetPrefab()).name)).Append(',').Append(Quoted(Name(owner)))
+                    .Append(',').Append(Quoted(Name(data.m_uid.UserID)))
                     .Append(',').Append(distance.ToString("F0", CultureInfo.InvariantCulture)).Append('\n');
             }
             bossRecords.Clear();

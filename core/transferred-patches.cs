@@ -131,7 +131,7 @@ namespace WorldPerformance
                 Optional(typeof(ReceivedRecordSaves), ReceivedRecordSaves.Initialize);
                 Optional(typeof(SavedChunkValues), SavedChunkValues.Initialize);
                 Optional(typeof(ServerAssetUnload), ServerAssetUnload.Initialize);
-                Optional(typeof(ConnectionLog), patches => ConnectionLog.Initialize());
+                Optional(typeof(ConnectionLog), ConnectionLog.Initialize);
                 Optional(typeof(FrameReports), FrameReports.Initialize);
                 Optional(typeof(DropThatSyncCache), patches => DropThatSyncCache.Initialize(patches, Plugin.Log));
                 Optional(typeof(DropThatParsing), patches => DropThatParsing.Initialize(patches, Plugin.Log));
