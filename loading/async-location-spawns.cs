@@ -33,6 +33,7 @@ namespace WorldPerformance
             // The proxy this copy belongs to, until that proxy unloads.
             internal LocationProxy Proxy;
             internal AsyncInstantiateOperation<GameObject> Operation;
+            internal CompactLocationJob Compact;
             internal RandomSpawn[] Spawns;
             internal RandomObject[] Objects;
             internal ZNetView[] Views;
@@ -44,28 +45,29 @@ namespace WorldPerformance
             internal Quaternion InteriorRotation;
         }
 
+        [HarmonyPatch(typeof(Game), "SpawnPlayer")]
+        private static class PrepareLoadedLocations
+        {
+            private static void Postfix()
+            {
+                if (!CompactLocationJob.Enabled || !ZoneSystem.instance || !ZNet.instance || ZNet.instance.IsServer()) return;
+                foreach (string name in new[] { "TheHole01", "StoneTower1", "CharredTowerRuins1", "CharredRuins1" })
+                {
+                    var location = find(ZoneSystem.instance, name.GetStableHashCode());
+                    if (location != null && location.m_prefab.IsLoaded)
+                        ZoneSystem.instance.StartCoroutine(CompactLocationJob.Prepare(location.m_prefab.Asset));
+                }
+            }
+        }
+
         [HarmonyPatch(typeof(LocationProxy), "SpawnLocation")]
         private static class Proxy
         {
             private static bool Prefix(LocationProxy __instance, ref bool __result, ref GameObject ___m_instance)
             {
                 if (copies.TryGetValue(__instance, out var copy))
-                {
-                    __result = false;
-                    if (!copy.Operation.isDone) return false;
-                    copies.Remove(__instance);
-                    // As the game's own spawn attaches its copy; a failed copy tries again next frame.
-                    var instance = Finish(copy);
-                    if (!instance) return false;
-                    ___m_instance = instance;
-                    view(__instance).LoadFields();
-                    needsSpawn(__instance) = false;
-                    if (loadingMark(__instance) != null)
                     {
-                        ZoneSystem.instance.UnsetLoadingInZone(loadingMark(__instance));
-                        loadingMark(__instance) = null;
-                    }
-                    __result = true;
+                    Complete(__instance, copy, ref __result, ref ___m_instance);
                     return false;
                 }
                 if (ZNet.instance == null || ZNet.instance.IsServer()) return true;
@@ -90,7 +92,25 @@ namespace WorldPerformance
                 copy = Start(location, data.GetInt(ZDOVars.s_seed), __instance.transform.position, __instance.transform.rotation);
                 copy.Proxy = __instance;
                 copies[__instance] = copy;
+                if (copy.Compact != null) Complete(__instance, copy, ref __result, ref ___m_instance);
                 return false;
+            }
+
+            private static void Complete(LocationProxy proxy, Copy copy, ref bool result, ref GameObject instance)
+            {
+                result = false;
+                if (!Ready(copy)) return;
+                copies.Remove(proxy);
+                instance = Finish(copy);
+                if (!instance) return;
+                view(proxy).LoadFields();
+                needsSpawn(proxy) = false;
+                if (loadingMark(proxy) != null)
+                {
+                    ZoneSystem.instance.UnsetLoadingInZone(loadingMark(proxy));
+                    loadingMark(proxy) = null;
+                }
+                result = true;
             }
         }
 
@@ -110,8 +130,9 @@ namespace WorldPerformance
             private static void Postfix()
             {
                 for (int index = orphans.Count - 1; index >= 0; index--)
-                    if (orphans[index].Operation.isDone)
+                    if (orphans[index].Compact != null || orphans[index].Operation.isDone)
                     {
+                        orphans[index].Compact?.Cancel();
                         var instance = Finish(orphans[index]);
                         orphans.RemoveAt(index);
                         if (instance) Object.Destroy(instance);
@@ -163,14 +184,41 @@ namespace WorldPerformance
             foreach (var choice in copy.Objects) choice.Randomize(position + rotation * choice.gameObject.transform.position, component);
             foreach (var network in copy.Views) network.gameObject.SetActive(false);
             location.m_prefab.Load();
-            copy.Operation = Object.InstantiateAsync(asset, position, rotation);
-            copy.Operation.completed += _ => Attach(copy);
+            if (CompactLocationJob.Supports(location.m_prefabName))
+                copy.Compact = new CompactLocationJob(asset, position, rotation);
+            else
+                StartNative(copy, asset, position, rotation);
             busy.Add(location);
             return copy;
         }
 
+        private static void StartNative(Copy copy, GameObject asset, Vector3 position, Quaternion rotation)
+        {
+            copy.Operation = Object.InstantiateAsync(asset, position, rotation);
+            copy.Operation.completed += _ => Attach(copy);
+        }
+
+        private static bool Ready(Copy copy)
+        {
+            if (copy.Compact == null) return copy.Operation.isDone;
+            try
+            {
+                if (!copy.Compact.Advance()) return false;
+                if (!copy.Compact.Unsupported) return true;
+            }
+            catch (System.Exception error)
+            {
+                Debug.LogException(error);
+            }
+            copy.Compact.Cancel();
+            copy.Compact = null;
+            StartNative(copy, copy.Location.m_prefab.Asset, copy.Proxy.transform.position, copy.Proxy.transform.rotation);
+            return false;
+        }
+
         private static GameObject Instance(Copy copy)
         {
+            if (copy.Compact != null) return copy.Compact.Result;
             var results = copy.Operation.Result;
             return results != null && results.Length > 0 ? results[0] : null;
         }
