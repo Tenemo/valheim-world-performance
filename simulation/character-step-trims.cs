@@ -42,7 +42,10 @@ namespace WorldPerformance
             public int GetHashCode(Collider item) => RuntimeHelpers.GetHashCode(item);
         }
 
-        private static readonly Dictionary<Collider, Heightmap> grounds = new Dictionary<Collider, Heightmap>(new Identity());
+        // A collider without a heightmap keeps null. A terrain collider's heightmap is held weakly: a zone's heightmap holds its
+        // heights, build data and world generator, and a strong entry kept every unloaded zone's alive until the
+        // table filled. Unity holds a live heightmap's script object itself, so the entry stays filled while its zone is loaded.
+        private static readonly Dictionary<Collider, WeakReference<Heightmap>> grounds = new Dictionary<Collider, WeakReference<Heightmap>>(new Identity());
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -128,13 +131,18 @@ namespace WorldPerformance
             return code;
         }
 
-        // Destroyed colliders are never seen again; their entries go when the table fills.
+        // Destroyed colliders are never seen again; their entries go when the table fills. A heightmap destroyed while its
+        // collider lives is looked up again, as the game would.
         internal static Heightmap Ground(Collider ground)
         {
-            if (grounds.TryGetValue(ground, out var heightmap)) return heightmap;
-            if (grounds.Count >= 4096) grounds.Clear();
-            heightmap = ground.gameObject.GetComponent<Heightmap>();
-            grounds[ground] = heightmap;
+            if (grounds.TryGetValue(ground, out var kept))
+            {
+                if (kept == null) return null;
+                if (kept.TryGetTarget(out var known) && known) return known;
+            }
+            else if (grounds.Count >= 4096) grounds.Clear();
+            var heightmap = ground.gameObject.GetComponent<Heightmap>();
+            grounds[ground] = heightmap == null ? null : new WeakReference<Heightmap>(heightmap);
             return heightmap;
         }
     }
