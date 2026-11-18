@@ -23,7 +23,7 @@ namespace WorldPerformance
         private static readonly System.Func<ZoneSystem, int, ZoneSystem.ZoneLocation> find =
             AccessTools.MethodDelegate<System.Func<ZoneSystem, int, ZoneSystem.ZoneLocation>>(AccessTools.Method(typeof(ZoneSystem), "GetLocation", new[] { typeof(int) }));
         private static readonly Dictionary<LocationProxy, Copy> copies = new Dictionary<LocationProxy, Copy>();
-        private static readonly HashSet<ZoneSystem.ZoneLocation> busy = new HashSet<ZoneSystem.ZoneLocation>();
+        private static readonly HashSet<SoftReference<GameObject>> busy = new HashSet<SoftReference<GameObject>>();
         private static readonly List<Copy> orphans = new List<Copy>();
 
         // A copy in flight and the prefab state the game restores after its own copy.
@@ -40,6 +40,13 @@ namespace WorldPerformance
             internal Vector3 Position;
             internal Quaternion Rotation;
             internal Location Component;
+            internal int RandomizedSpawns, RandomizedObjects;
+            internal List<(GameObject target, bool active)> ChoiceStates;
+            internal void Remember(GameObject target)
+            {
+                if (target)
+                    (ChoiceStates ??= new List<(GameObject, bool)>()).Add((target, target.activeSelf));
+            }
             internal bool Interior;
             internal Vector3 GeneratorPosition, InteriorPosition;
             internal Quaternion InteriorRotation;
@@ -51,7 +58,7 @@ namespace WorldPerformance
             private static void Postfix()
             {
                 if (!CompactLocationJob.Enabled || !ZoneSystem.instance || !ZNet.instance || ZNet.instance.IsServer()) return;
-                foreach (string name in new[] { "TheHole01", "StoneTower1", "CharredTowerRuins1", "CharredRuins1" })
+                foreach (string name in CompactLocationJob.Families)
                 {
                     var location = find(ZoneSystem.instance, name.GetStableHashCode());
                     if (location != null && location.m_prefab.IsLoaded)
@@ -76,7 +83,7 @@ namespace WorldPerformance
                 int hash = data.GetInt(ZDOVars.s_location);
                 var location = hash == 0 ? null : find(ZoneSystem.instance, hash);
                 if (location == null) return true;
-                bool held = busy.Contains(location);
+                bool held = busy.Contains(location.m_prefab);
                 // Behind the loading screen the copy is hidden, and a zone marked loading holds back every object's creation.
                 var player = Player.m_localPlayer;
                 if (!held && (!Asynchronous || player == null || player.IsTeleporting() || ZoneSystem.instance.ShouldDelayProxyLocationSpawning(hash))) return true;
@@ -123,6 +130,44 @@ namespace WorldPerformance
             }
         }
 
+        [HarmonyPatch(typeof(ZNetScene), nameof(ZNetScene.Shutdown))]
+        private static class LeavingWorld
+        {
+            private static void Prefix() => Drain();
+        }
+
+        // A scene that closes will never tick its orphan queue again. Unhook the proxies first
+        // so a completed native operation cannot attach its result to a departing world.
+        internal static void Drain()
+        {
+            reportedFallbacks.Clear();
+            CompactLocationJob.LeaveWorld();
+            foreach (var copy in copies.Values)
+            {
+                copy.Proxy = null;
+                orphans.Add(copy);
+            }
+            copies.Clear();
+            while (orphans.Count > 0)
+            {
+                int last = orphans.Count - 1;
+                var copy = orphans[last];
+                orphans.RemoveAt(last);
+                try
+                {
+                    if (copy.Compact != null) copy.Compact.Cancel();
+                    else if (!copy.Operation.isDone) copy.Operation.WaitForCompletion();
+                    var abandoned = Finish(copy);
+                    if (abandoned) Object.Destroy(abandoned);
+                }
+                catch (System.Exception error)
+                {
+                    // Finish releasing the other location families even if an external component failed.
+                    Debug.LogException(error);
+                }
+            }
+        }
+
         // Copies whose proxy unloaded first are finished and destroyed as they complete, which frees their prefab.
         [HarmonyPatch(typeof(ZoneSystem), "Update")]
         private static class Orphans
@@ -132,9 +177,10 @@ namespace WorldPerformance
                 for (int index = orphans.Count - 1; index >= 0; index--)
                     if (orphans[index].Compact != null || orphans[index].Operation.isDone)
                     {
-                        orphans[index].Compact?.Cancel();
-                        var instance = Finish(orphans[index]);
+                        var copy = orphans[index];
                         orphans.RemoveAt(index);
+                        copy.Compact?.Cancel();
+                        var instance = Finish(copy);
                         if (instance) Object.Destroy(instance);
                     }
             }
@@ -145,51 +191,83 @@ namespace WorldPerformance
         private static Copy Start(ZoneSystem.ZoneLocation location, int seed, Vector3 position, Quaternion rotation)
         {
             location.m_prefab.Load();
-            var asset = location.m_prefab.Asset;
-            var copy = new Copy
+            Copy copy = null;
+            bool resultReference = false;
+            var random = Random.state;
+            try
             {
-                Location = location,
-                Views = PrefabComponentQueries.EnabledChildren<ZNetView>(asset),
-                Objects = PrefabComponentQueries.EnabledChildren<RandomObject>(asset),
-                Spawns = PrefabComponentQueries.EnabledChildren<RandomSpawn>(asset),
-                Component = asset.GetComponent<Location>(),
-                Position = asset.transform.position,
-                Rotation = asset.transform.rotation,
-            };
-            foreach (var spawn in copy.Spawns) spawn.Prepare();
-            var component = copy.Component;
-            Vector3 interior = Vector3.zero, generator = Vector3.zero;
-            if (component.m_interiorTransform && component.m_generator)
-            {
-                interior = component.m_interiorTransform.localPosition;
-                generator = component.m_generator.transform.localPosition;
+                var asset = location.m_prefab.Asset;
+                copy = new Copy
+                {
+                    Location = location,
+                    Views = PrefabComponentQueries.EnabledChildren<ZNetView>(asset),
+                    Objects = PrefabComponentQueries.EnabledChildren<RandomObject>(asset),
+                    Spawns = PrefabComponentQueries.EnabledChildren<RandomSpawn>(asset),
+                    Component = asset.GetComponent<Location>(),
+                    Position = asset.transform.position,
+                    Rotation = asset.transform.rotation,
+                };
+                foreach (var spawn in copy.Spawns)
+                {
+                    copy.Remember(spawn.m_OffObject);
+                    spawn.Prepare();
+                }
+                foreach (var choice in copy.Objects)
+                    foreach (var entry in choice.m_objects) copy.Remember(entry.m_object);
+                var component = copy.Component;
+                Vector3 interior = Vector3.zero, generator = Vector3.zero;
+                if (component.m_interiorTransform && component.m_generator)
+                {
+                    interior = component.m_interiorTransform.localPosition;
+                    generator = component.m_generator.transform.localPosition;
+                }
+                asset.transform.position = Vector3.zero;
+                asset.transform.rotation = Quaternion.identity;
+                copy.Interior = component && component.m_useCustomInteriorTransform && component.m_interiorTransform && component.m_generator;
+                if (copy.Interior)
+                {
+                    copy.GeneratorPosition = component.m_generator.transform.localPosition;
+                    copy.InteriorPosition = component.m_interiorTransform.localPosition;
+                    copy.InteriorRotation = component.m_interiorTransform.localRotation;
+                    var zone = ZoneSystem.GetZonePos(ZoneSystem.GetZone(position));
+                    component.m_generator.transform.localPosition = Vector3.zero;
+                    Vector3 offset = (Vector3)(Matrix4x4.Rotate(Quaternion.Inverse(rotation)) * Matrix4x4.Translate(zone + interior + generator - position)).GetColumn(3);
+                    offset.y = component.m_interiorTransform.localPosition.y;
+                    component.m_interiorTransform.localPosition = offset;
+                    component.m_interiorTransform.localRotation = Quaternion.Inverse(rotation);
+                }
+                Random.InitState(seed);
+                foreach (var spawn in copy.Spawns)
+                {
+                    copy.RandomizedSpawns++;
+                    spawn.Randomize(position + rotation * spawn.gameObject.transform.position, component);
+                }
+                foreach (var choice in copy.Objects)
+                {
+                    copy.RandomizedObjects++;
+                    choice.Randomize(position + rotation * choice.gameObject.transform.position, component);
+                }
+                foreach (var network in copy.Views) network.gameObject.SetActive(false);
+                location.m_prefab.Load();
+                resultReference = true;
+                if (CompactLocationJob.Supports(location.m_prefabName))
+                    copy.Compact = new CompactLocationJob(asset, position, rotation);
+                else
+                    StartNative(copy, asset, position, rotation);
+                busy.Add(location.m_prefab);
+                return copy;
             }
-            asset.transform.position = Vector3.zero;
-            asset.transform.rotation = Quaternion.identity;
-            copy.Interior = component && component.m_useCustomInteriorTransform && component.m_interiorTransform && component.m_generator;
-            if (copy.Interior)
+            catch
             {
-                copy.GeneratorPosition = component.m_generator.transform.localPosition;
-                copy.InteriorPosition = component.m_interiorTransform.localPosition;
-                copy.InteriorRotation = component.m_interiorTransform.localRotation;
-                var zone = ZoneSystem.GetZonePos(ZoneSystem.GetZone(position));
-                component.m_generator.transform.localPosition = Vector3.zero;
-                Vector3 offset = (Vector3)(Matrix4x4.Rotate(Quaternion.Inverse(rotation)) * Matrix4x4.Translate(zone + interior + generator - position)).GetColumn(3);
-                offset.y = component.m_interiorTransform.localPosition.y;
-                component.m_interiorTransform.localPosition = offset;
-                component.m_interiorTransform.localRotation = Quaternion.Inverse(rotation);
+                try
+                {
+                    if (resultReference) location.m_prefab.Release();
+                    if (copy != null) RestoreSource(copy);
+                    else location.m_prefab.Release();
+                }
+                finally { Random.state = random; }
+                throw;
             }
-            Random.InitState(seed);
-            foreach (var spawn in copy.Spawns) spawn.Randomize(position + rotation * spawn.gameObject.transform.position, component);
-            foreach (var choice in copy.Objects) choice.Randomize(position + rotation * choice.gameObject.transform.position, component);
-            foreach (var network in copy.Views) network.gameObject.SetActive(false);
-            location.m_prefab.Load();
-            if (CompactLocationJob.Supports(location.m_prefabName))
-                copy.Compact = new CompactLocationJob(asset, position, rotation);
-            else
-                StartNative(copy, asset, position, rotation);
-            busy.Add(location);
-            return copy;
         }
 
         private static void StartNative(Copy copy, GameObject asset, Vector3 position, Quaternion rotation)
@@ -205,15 +283,33 @@ namespace WorldPerformance
             {
                 if (!copy.Compact.Advance()) return false;
                 if (!copy.Compact.Unsupported) return true;
+                ReportFallback(copy.Location.m_prefabName, copy.Compact.FallbackReason);
             }
             catch (System.Exception error)
             {
-                Debug.LogException(error);
+                CompactLocationJob.Fallbacks++;
+                ReportFallback(copy.Location.m_prefabName, error.ToString());
             }
             copy.Compact.Cancel();
             copy.Compact = null;
-            StartNative(copy, copy.Location.m_prefab.Asset, copy.Proxy.transform.position, copy.Proxy.transform.rotation);
+            try
+            {
+                StartNative(copy, copy.Location.m_prefab.Asset, copy.Proxy.transform.position, copy.Proxy.transform.rotation);
+            }
+            catch
+            {
+                copies.Remove(copy.Proxy);
+                copy.Location.m_prefab.Release();
+                RestoreSource(copy);
+                throw;
+            }
             return false;
+        }
+
+        private static readonly HashSet<string> reportedFallbacks = new HashSet<string>();
+        private static void ReportFallback(string family, string reason)
+        {
+            if (reportedFallbacks.Add(family)) Plugin.Log?.LogWarning($"Using native location copy for {family}: {reason}");
         }
 
         private static GameObject Instance(Copy copy)
@@ -233,32 +329,78 @@ namespace WorldPerformance
         private static GameObject Finish(Copy copy)
         {
             var location = copy.Location;
-            var instance = Instance(copy);
-            if (instance)
+            GameObject instance = null;
+            bool transferred = false;
+            try
             {
-                // Unity names an asynchronous copy "<name> (Clone)"; the game's own copy has no space.
-                instance.name = location.m_prefab.Asset.name + "(Clone)";
-                instance.TransferReference(location.m_prefab);
-                Attach(copy);
-                instance.SetActive(true);
+                try
+                {
+                    instance = Instance(copy);
+                    if (instance)
+                    {
+                        instance.name = location.m_prefab.Asset.name + "(Clone)";
+                        instance.TransferReference(location.m_prefab);
+                        transferred = true;
+                        if (copy.Proxy)
+                        {
+                            Attach(copy);
+                            instance.SetActive(true);
+                        }
+                    }
+                }
+                finally
+                {
+                    if (!transferred) location.m_prefab.Release();
+                    RestoreSource(copy);
+                }
+                if (copy.Proxy) SnapToGround.SnappAll();
+                return instance;
             }
-            else location.m_prefab.Release();
-            foreach (var spawn in copy.Spawns) spawn.Reset();
-            foreach (var choice in copy.Objects) choice.Reset();
-            foreach (var network in copy.Views) network.gameObject.SetActive(true);
-            var asset = location.m_prefab.Asset;
-            asset.transform.position = copy.Position;
-            asset.transform.rotation = copy.Rotation;
-            if (copy.Interior)
+            catch
             {
-                copy.Component.m_generator.transform.localPosition = copy.GeneratorPosition;
-                copy.Component.m_interiorTransform.localPosition = copy.InteriorPosition;
-                copy.Component.m_interiorTransform.localRotation = copy.InteriorRotation;
+                if (instance) Object.Destroy(instance);
+                throw;
             }
-            location.m_prefab.Release();
-            busy.Remove(location);
-            SnapToGround.SnappAll();
-            return instance;
+        }
+
+        private static void RestoreSource(Copy copy)
+        {
+            try
+            {
+                try
+                {
+                    for (int i = 0; i < copy.RandomizedSpawns; i++) if (copy.Spawns[i]) copy.Spawns[i].Reset();
+                    for (int i = 0; i < copy.RandomizedObjects; i++) if (copy.Objects[i]) copy.Objects[i].Reset();
+                }
+                catch
+                {
+                    // These components were all active when collected. Finish undoing the seed if a reset hook failed.
+                    foreach (var spawn in copy.Spawns) if (spawn && !spawn.gameObject.activeSelf) spawn.gameObject.SetActive(true);
+                    foreach (var choice in copy.Objects) if (choice && !choice.gameObject.activeSelf) choice.gameObject.SetActive(true);
+                    throw;
+                }
+                finally
+                {
+                    // RandomSpawn can turn off a child view before the explicit network-view loop is reached.
+                    foreach (var view in copy.Views) if (view && !view.gameObject.activeSelf) view.gameObject.SetActive(true);
+                    if (copy.ChoiceStates != null)
+                        foreach (var (target, active) in copy.ChoiceStates)
+                            if (target && target.activeSelf != active) target.SetActive(active);
+                    var asset = copy.Location.m_prefab.Asset;
+                    asset.transform.SetPositionAndRotation(copy.Position, copy.Rotation);
+                    if (copy.Interior)
+                    {
+                        copy.Component.m_generator.transform.localPosition = copy.GeneratorPosition;
+                        copy.Component.m_interiorTransform.localPosition = copy.InteriorPosition;
+                        copy.Component.m_interiorTransform.localRotation = copy.InteriorRotation;
+                    }
+                }
+            }
+            finally
+            {
+                busy.Remove(copy.Location.m_prefab);
+                copy.Location.m_prefab.Release();
+            }
         }
     }
 }

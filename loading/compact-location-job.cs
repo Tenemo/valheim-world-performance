@@ -16,6 +16,8 @@ namespace WorldPerformance
         {
             public Transform Source;
             public Node Parent, Owner;
+            public ZNetView NetworkView;
+            public bool CanSplitChildren;
             public Component[] Components;
             public readonly List<Node> Children = new List<Node>();
         }
@@ -51,33 +53,39 @@ namespace WorldPerformance
         private static int budgetFrame = -1;
         private static long usedTicks;
         private static readonly long slice = Stopwatch.Frequency / 500;
-        internal static bool Enabled { get; set; }
+        // The isolated client switches the compiler off for comparisons.
+        internal static bool Enabled { get; set; } = true;
+        internal static readonly string[] Families = { "TheHole01", "StoneTower1", "CharredRuins1", "CharredTowerRuins1" };
 
         internal static int Completed, Fallbacks, Prepared, Reused;
         // Plans do not own game assets. A new prefab instance starts with a new plan.
-        private static readonly ConditionalWeakTable<GameObject, Plan> plans = new ConditionalWeakTable<GameObject, Plan>();
+        private static ConditionalWeakTable<GameObject, Plan> plans = new ConditionalWeakTable<GameObject, Plan>();
+        internal static void LeaveWorld() => plans = new ConditionalWeakTable<GameObject, Plan>();
+
         internal static IEnumerator Prepare(GameObject source)
         {
-            if (!source || plans.TryGetValue(source, out _))
+            var cache = plans;
+            if (!source || cache.TryGetValue(source, out _))
                 yield break;
             var plan = new Plan
             {
                 Lookup = new Dictionary<Transform, Node>()
             };
             var topology = Discover(source, plan);
-            while (source && topology.MoveNext())
+            while (source && ReferenceEquals(cache, plans) && topology.MoveNext())
                 yield return null;
-            if (source && plan.Fallback == null && !plans.TryGetValue(source, out _))
+            if (source && ReferenceEquals(cache, plans) && plan.Fallback == null && !cache.TryGetValue(source, out _))
             {
-                plans.Add(source, plan);
+                cache.Add(source, plan);
                 Prepared++;
             }
         }
 
-        internal static bool Supports(string name) => Enabled && (name == "TheHole01" || name == "StoneTower1" || name == "CharredRuins1" || name == "CharredTowerRuins1");
+        internal static bool Supports(string name) => Enabled && Array.IndexOf(Families, name) >= 0;
         private readonly IEnumerator work;
         internal GameObject Result { get; private set; }
-        internal bool Unsupported { get; private set; }
+        internal string FallbackReason { get; private set; }
+        internal bool Unsupported => FallbackReason != null;
 
         private bool finished;
         internal CompactLocationJob(GameObject asset, Vector3 position, Quaternion rotation)
@@ -130,6 +138,7 @@ namespace WorldPerformance
             {
                 plan = prepared.ForCopy();
                 var components = new List<Component>();
+                int checkedNodes = 0;
                 foreach (var node in plan.Nodes)
                 {
                     if (!Matches(node, components))
@@ -139,7 +148,7 @@ namespace WorldPerformance
                         break;
                     }
 
-                    yield return null;
+                    if ((++checkedNodes & 15) == 0) yield return null;
                 }
 
                 if (plan != null)
@@ -165,7 +174,7 @@ namespace WorldPerformance
                 yield return null;
             if (plan.OmittedNetworkRoots == 0)
             {
-                Unsupported = true;
+                FallbackReason = plan.Fallback ?? "all network subtrees are referenced";
                 Fallbacks++;
                 yield break;
             }
@@ -219,6 +228,11 @@ namespace WorldPerformance
             while (pending.Count > 0)
             {
                 var next = pending.Pop();
+                if (!next.source)
+                {
+                    plan.Fallback = "source hierarchy changed while preparing";
+                    yield break;
+                }
                 var node = BuildNode(next.source, next.parent, plan, nodes);
                 if (plan.Fallback != null)
                     yield break;
@@ -237,7 +251,7 @@ namespace WorldPerformance
             if (!node.Source)
                 return false;
             if (node.Owner != null)
-                return node.Source.GetComponent<ZNetView>();
+                return node.NetworkView;
             if (node.Source.childCount != node.Children.Count)
                 return false;
             for (int i = 0; i < node.Children.Count; i++)
@@ -260,12 +274,7 @@ namespace WorldPerformance
             if (plan.Fallback != null)
                 yield break;
             foreach (var candidate in plan.Candidates)
-                for (var parent = candidate.Parent; parent != null; parent = parent.Parent)
-                    if (parent.Components.Any(c => !CanSynthesize(c)))
-                    {
-                        plan.Protected.Add(candidate);
-                        break;
-                    }
+                if (!candidate.Parent.CanSplitChildren) plan.Protected.Add(candidate);
 
             bool changed;
             do
@@ -273,9 +282,9 @@ namespace WorldPerformance
                 int before = plan.Protected.Count;
                 foreach (var node in plan.Nodes)
                 {
-                    yield return null;
                     if (node.Owner != null && !plan.Protected.Contains(node.Owner))
                         continue;
+                    yield return null;
                     var retainedComponents = node.Owner == node ? node.Source.GetComponentsInChildren<Component>(true) : node.Components;
                     if (retainedComponents.Any(c => !c))
                     {
@@ -287,6 +296,11 @@ namespace WorldPerformance
                     {
                         if (component is MonoBehaviour)
                         {
+                            if (component.GetType().Assembly != typeof(Location).Assembly)
+                            {
+                                plan.Fallback = "external behaviour " + component.GetType().FullName;
+                                yield break;
+                            }
                             var visited = new HashSet<object>(referenceIdentity);
                             foreach (var field in SerializedFields(component.GetType()))
                                 foreach (var reference in References(field.GetValue(component), visited))
@@ -295,9 +309,9 @@ namespace WorldPerformance
                         }
                         else
                         {
-                            if (component is ParticleSystem || component is Animator || component is Animation)
+                            if (!KnownNativeComponent(component))
                             {
-                                plan.Fallback = "native animation/particle reference contract";
+                                plan.Fallback = "unclassified native references on " + component.GetType().Name;
                                 yield break;
                             }
 
@@ -339,7 +353,8 @@ namespace WorldPerformance
                 plan.Root = node;
             else
                 parent.Children.Add(node);
-            if (source.GetComponent<ZNetView>())
+            node.NetworkView = source.GetComponent<ZNetView>();
+            if (node.NetworkView)
             {
                 if (parent == null)
                 {
@@ -360,6 +375,7 @@ namespace WorldPerformance
                 return node;
             }
 
+            node.CanSplitChildren = (parent == null || parent.CanSplitChildren) && node.Components.All(CanSynthesize);
             return node;
         }
 
@@ -379,7 +395,7 @@ namespace WorldPerformance
             return false;
         }
 
-        private static bool CanSynthesize(Component component) => component is Transform || component.GetType() == typeof(Location) || component.GetType() == typeof(RandomSpawn) || component.GetType() == typeof(RandomObject);
+        private static bool CanSynthesize(Component component) => component.GetType() == typeof(Transform) || component.GetType() == typeof(Location) || component.GetType() == typeof(RandomSpawn) || component.GetType() == typeof(RandomObject);
         private static bool Target(Object reference, Dictionary<Transform, Node> nodes, out Node node)
         {
             node = null;
@@ -394,6 +410,14 @@ namespace WorldPerformance
             return false;
         }
 
+        // These types either hold asset references only or have their object links enumerated below.
+        // An unrecognized component keeps the entire copy on Unity's native path.
+        private static bool KnownNativeComponent(Component component) =>
+            component.GetType() == typeof(Transform) || component is MeshFilter || component is MeshRenderer ||
+            component is SkinnedMeshRenderer || component is LODGroup || component is BoxCollider ||
+            component is SphereCollider || component is CapsuleCollider || component is MeshCollider ||
+            component is Light || component is AudioSource || component is Rigidbody;
+
         private static IEnumerable<Object> NativeReferences(Component component)
         {
             if (component is LODGroup lod)
@@ -401,8 +425,11 @@ namespace WorldPerformance
                     foreach (var renderer in level.renderers)
                         if (renderer)
                             yield return renderer;
-            if (component is Renderer render && render.probeAnchor)
-                yield return render.probeAnchor;
+            if (component is Renderer render)
+            {
+                if (render.probeAnchor) yield return render.probeAnchor;
+                if (render.lightProbeProxyVolumeOverride) yield return render.lightProbeProxyVolumeOverride;
+            }
             if (component is SkinnedMeshRenderer skin)
             {
                 if (skin.rootBone)
@@ -412,8 +439,7 @@ namespace WorldPerformance
                         yield return bone;
             }
 
-            if (component is Joint joint && joint.connectedBody)
-                yield return joint.connectedBody;
+
         }
 
         private static FieldInfo[] SerializedFields(Type type)

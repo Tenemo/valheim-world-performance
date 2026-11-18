@@ -267,6 +267,7 @@ namespace WorldPerformance
         {
             Camera.onPreCull -= BeforeCamera;
             Finish(PresentationWait.Stop);
+            Finish(AsyncLocationSpawns.Drain);
             Finish(TransferredPatches.Stop);
             Finish(FarFlames.Stop);
             Finish(WorldPerformance.SmallFarShadows.Stop);

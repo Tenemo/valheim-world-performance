@@ -30,7 +30,7 @@ The only visible differences are small: crops and other small objects more than 
 - **Saves and cleanups don't interrupt play.** Automatic saves hitch for about 17 ms instead of 65, and the hourly asset cleanup waits for a loading screen or the menu, as does unloading the ruins and dungeon rooms you've passed.
 - **No freezes from a busy disk.** Epic Loot's and Equipment and Quick Slots' file checks and saves no longer stall the game while the disk is busy.
 - **No freeze when AzuClock first appears.**
-- **New places appear without a stutter.** Ruins, dungeons, regrown grass and distant terrain build over a few frames instead of one long one, terrain builds in about half the time, and what you leave behind is cleared over about a second.
+- **New places appear without a stutter.** Several large ruins and dungeon entrances appear sooner as you approach. Ruins, dungeons, regrown grass and distant terrain build over a few frames instead of one long one, terrain builds in about half the time, and what you leave behind is cleared over about a second.
 - **Chests load faster.** Chests full of items load in a third of the time or less when you arrive, and so does your inventory when you log in.
 - **The game starts about 4 seconds sooner.**
 - **Loading screens end sooner.** Arriving at a large base takes about 3 seconds less, or 9 to 14 with a large mod pack. Portal trips end about a second sooner, and joining at your base or respawning at a bed about 2 seconds sooner.
