@@ -152,6 +152,8 @@ namespace WorldPerformance
             // Batches holding the member's merged parts, with how many parts and vertices each.
             internal readonly Dictionary<Batch, (int slots, int vertices)> Batches = new Dictionary<Batch, (int, int)>();
             internal Dictionary<int, object> Properties = new Dictionary<int, object>();
+            // Whether the member's merging renderers are hidden, with their own settings kept to show them again.
+            internal bool NativeHidden;
             internal ulong Signature;
             internal int Version;
             // Identifies the member's current detail-level check; its earlier entries in the queue are void.

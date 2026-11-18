@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using BepInEx.Bootstrap;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -92,19 +93,21 @@ namespace WorldPerformance
             typeof(AutoJumpLedge), typeof(DropOnDestroyed), typeof(UnseenEffect) };
         // Behaviours that touch no renderer a record holds: they read the piece, show hover text, hold an area, a seat, a spawn
         // point or a station connection, switch a light, rotate the piece once as it spawns, or create objects of their own,
-        // which a record never holds and the game keeps drawing natively.
+        // which a record never holds and the game keeps drawing natively. An item stand creates and destroys the model of the
+        // item it holds under its attach point, which a record leaves out (see Components).
         private static readonly HashSet<Type> inertBehaviours = new HashSet<Type> { typeof(EffectArea), typeof(GuidePoint), typeof(Bed), typeof(Chair),
             typeof(Switch), typeof(HoverText), typeof(Sign), typeof(MapTable), typeof(MusicVolume), typeof(Incinerator), typeof(OfferingBowl),
             typeof(StationExtension), typeof(LightLod), typeof(RandomPieceRotation), typeof(ZSFX), typeof(SmokeSpawner), typeof(CinderSpawner),
-            typeof(SpawnOnDamaged), typeof(ProximityState), typeof(TimedDestruction) };
+            typeof(SpawnOnDamaged), typeof(ProximityState), typeof(TimedDestruction), typeof(ItemStand) };
         // Behaviours that change how a piece looks only by switching objects of its own on and off, with the objects each one
         // switches and the methods that do it. The methods are patched to compare those objects and hand the piece back to
-        // native drawing when they changed what it draws, as the game's own wear, wetness and snow visuals do.
+        // native drawing when they changed what it draws, as the game's own wear, wetness and snow visuals do. A cooking
+        // station also creates and destroys the models of the food in its slots, which a record leaves out (see Components).
         private static readonly (Type type, string[] objects, string[] methods)[] switchedBehaviours = {
             (typeof(Container), new[] { "m_open", "m_closed" }, new[] { "UpdateUseVisual" }),
             (typeof(Fireplace), new[] { "m_enabledObject", "m_enabledObjectHigh", "m_enabledObjectLow", "m_fullObject", "m_halfObject", "m_emptyObject",
                 "m_playerBaseObject" }, new[] { "UpdateState" }),
-            (typeof(CookingStation), new[] { "m_cookingObject", "m_haveFireObject", "m_haveFuelObject" }, new[] { "UpdateVisual", "SetSlotVisual" }),
+            (typeof(CookingStation), new[] { "m_cookingObject", "m_haveFireObject", "m_haveFuelObject" }, new[] { "UpdateVisual" }),
             (typeof(Smelter), new[] { "m_enabledObject", "m_disabledObject", "m_haveFuelObject", "m_haveOreObject", "m_noOreObject" }, new[] { "UpdateState" }),
             (typeof(Fermenter), new[] { "m_fermentingObject", "m_readyObject", "m_topObject" }, new[] { "SlowUpdate" }),
             (typeof(SapCollector), new[] { "m_notEmptyEffect", "m_workingEffect" }, new[] { "UpdateEffects" }),
@@ -112,10 +115,7 @@ namespace WorldPerformance
             (typeof(WispSpawner), new[] { "m_wispsNearbyObject" }, new[] { "UpdateDemister" }),
             (typeof(Trap), new[] { "m_visualArmed", "m_visualUnarmed" }, new[] { "UpdateState", "TriggerTrap" }),
             // A station's update every frame, CustomUpdate, is followed where it switches its in-use object; see InUseSwitches.
-            (typeof(CraftingStation), new[] { "m_areaMarker", "m_inUseObject", "m_haveFireObject" }, new[] { "ShowAreaMarker", "HideMarker", "CheckFire" }),
-            // An item stand destroys and creates the model of the item it holds instead of switching one, so its method
-            // compares the renderers themselves.
-            (typeof(ItemStand), new string[0], new[] { "SetVisualItem" }) };
+            (typeof(CraftingStation), new[] { "m_areaMarker", "m_inUseObject", "m_haveFireObject" }, new[] { "ShowAreaMarker", "HideMarker", "CheckFire" }) };
         // Behaviours that move, scale or replace objects under their own object. Every renderer there keeps drawing natively
         // while the rest of the piece merges, so one of these on the piece's own object keeps the whole piece native.
         private static readonly HashSet<Type> localBehaviours = new HashSet<Type> { typeof(Aoe), typeof(LightFlicker), typeof(GlobalWind),
@@ -154,20 +154,46 @@ namespace WorldPerformance
             skySlotsId = Shader.PropertyToID("TenemoPieces"), transformsId = Shader.PropertyToID("TenemoBuildingTransforms"),
             appearanceId = Shader.PropertyToID("TenemoPieceProperties"), probeStateId = Shader.PropertyToID("TenemoBuildingProbeState"),
             contextId = Shader.PropertyToID("TenemoDrawContext");
-        private static readonly Type containerType = AccessTools.Inner(typeof(MaterialMan), "PropertyContainer");
-        private static readonly AccessTools.FieldRef<object, List<Renderer>> containerRenderers = AccessTools.FieldRefAccess<List<Renderer>>(containerType, "m_assignedRenderers");
-        private static readonly AccessTools.FieldRef<object, IDictionary> containerProperties = AccessTools.FieldRefAccess<IDictionary>(containerType, "m_shaderProperties");
-        private static readonly AccessTools.FieldRef<object, IDictionary> materialBlocks = AccessTools.FieldRefAccess<IDictionary>(typeof(MaterialMan), "m_blocks");
-        private static readonly AccessTools.FieldRef<ZNetScene, List<ZNetView>> unloadedViews = AccessTools.FieldRefAccess<ZNetScene, List<ZNetView>>("m_tempRemoved");
-        private static readonly Type propertyType = AccessTools.Inner(typeof(MaterialMan), "ShaderProperty`1");
-        private static readonly AccessTools.FieldRef<object, int> propertyName = AccessTools.FieldRefAccess<int>(AccessTools.Inner(typeof(MaterialMan), "ShaderPropertyBase"), "NameID");
+        // The game's private members the renderer reads, resolved as it starts, so that a renamed one fails that
+        // start like any other missing requirement instead of failing every later use of this class.
+        private static bool membersResolved;
+        private static Type containerType, propertyType;
+        private static AccessTools.FieldRef<object, List<Renderer>> containerRenderers;
+        private static AccessTools.FieldRef<object, IDictionary> containerProperties, materialBlocks;
+        private static AccessTools.FieldRef<ZNetScene, List<ZNetView>> unloadedViews;
+        private static AccessTools.FieldRef<object, int> propertyName;
+        private static AccessTools.FieldRef<ZNetView, bool> ghostView;
+        private static AccessTools.FieldRef<ZNetScene, Dictionary<ZDO, ZNetView>> sceneViews;
+        private static AccessTools.FieldRef<WearNTear, ZNetView> wearViews;
         // The value types the merged slots can express, read without reflection calls or boxing; others use their getter.
-        private static readonly PropertyReader<float> floatValues = new PropertyReader<float>();
-        private static readonly PropertyReader<Color> colorValues = new PropertyReader<Color>();
-        private static readonly PropertyReader<Vector4> vector4Values = new PropertyReader<Vector4>();
-        private static readonly PropertyReader<Vector3> vector3Values = new PropertyReader<Vector3>();
-        private static readonly PropertyReader<Vector2> vector2Values = new PropertyReader<Vector2>();
+        private static PropertyReader<float> floatValues;
+        private static PropertyReader<Color> colorValues;
+        private static PropertyReader<Vector4> vector4Values;
+        private static PropertyReader<Vector3> vector3Values;
+        private static PropertyReader<Vector2> vector2Values;
         private static readonly Dictionary<Type, MethodInfo> propertyValues = new Dictionary<Type, MethodInfo>();
+
+        private static void ResolveMembers()
+        {
+            if (membersResolved) return;
+            Type Inner(string name) => AccessTools.Inner(typeof(MaterialMan), name) ?? throw new MissingMemberException("MaterialMan." + name + " is missing; rendering stays native.");
+            containerType = Inner("PropertyContainer");
+            propertyType = Inner("ShaderProperty`1");
+            containerRenderers = AccessTools.FieldRefAccess<List<Renderer>>(containerType, "m_assignedRenderers");
+            containerProperties = AccessTools.FieldRefAccess<IDictionary>(containerType, "m_shaderProperties");
+            materialBlocks = AccessTools.FieldRefAccess<IDictionary>(typeof(MaterialMan), "m_blocks");
+            unloadedViews = AccessTools.FieldRefAccess<ZNetScene, List<ZNetView>>("m_tempRemoved");
+            propertyName = AccessTools.FieldRefAccess<int>(Inner("ShaderPropertyBase"), "NameID");
+            ghostView = AccessTools.FieldRefAccess<ZNetView, bool>("m_ghost");
+            sceneViews = AccessTools.FieldRefAccess<ZNetScene, Dictionary<ZDO, ZNetView>>("m_instances");
+            wearViews = AccessTools.FieldRefAccess<WearNTear, ZNetView>("m_nview");
+            floatValues = new PropertyReader<float>();
+            colorValues = new PropertyReader<Color>();
+            vector4Values = new PropertyReader<Vector4>();
+            vector3Values = new PropertyReader<Vector3>();
+            vector2Values = new PropertyReader<Vector2>();
+            membersResolved = true;
+        }
 
         private sealed class PropertyReader<T> where T : struct, IEquatable<T>
         {
@@ -234,9 +260,6 @@ namespace WorldPerformance
         private static readonly Dictionary<int, string> recordExclusions = new Dictionary<int, string>();
         private static readonly Dictionary<string, long> excluded = new Dictionary<string, long>();
         private static readonly Dictionary<string, long> naturalExcluded = new Dictionary<string, long>();
-        private static readonly AccessTools.FieldRef<ZNetView, bool> ghostView = AccessTools.FieldRefAccess<ZNetView, bool>("m_ghost");
-        private static readonly AccessTools.FieldRef<ZNetScene, Dictionary<ZDO, ZNetView>> sceneViews =
-            AccessTools.FieldRefAccess<ZNetScene, Dictionary<ZDO, ZNetView>>("m_instances");
         private static readonly Dictionary<string, long> handedBack = new Dictionary<string, long>();
         // Reused lists for registration, planning and the sky depth render.
         private static readonly List<Component> components = new List<Component>();
@@ -292,12 +315,13 @@ namespace WorldPerformance
         private static ComputeShader compaction;
         private static int compact16, compact32;
         private static bool compactIndices;
+        // The isolated client can turn the kernels off for the renderer's next start, to draw as without compute shaders.
+        internal static bool CompactionKernels = true;
         private static GraphicsBuffer slotRuns;
         private static Run[] runs = new Run[SlotLimit * 8];
         private static readonly List<Batch> compactions = new List<Batch>();
         // The meshes with twins casting small parts' shadows, which the shadow distance checks look through.
         private static readonly List<Batch> twins = new List<Batch>();
-        private static readonly AccessTools.FieldRef<WearNTear, ZNetView> wearViews = AccessTools.FieldRefAccess<WearNTear, ZNetView>("m_nview");
         // Whether the stations' update reports the switch of its in-use object, rather than being checked after every call.
         private static bool inUseFollowed;
         private static readonly int slotCompactionId = Shader.PropertyToID("_SlotCompaction"), slotRunsId = Shader.PropertyToID("_SlotRuns"),
@@ -348,6 +372,7 @@ namespace WorldPerformance
             if (Running) return;
             if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D11)
                 throw new NotSupportedException("The spatial building renderer needs Direct3D 11; rendering stays native.");
+            ResolveMembers();
             string folder = Path.GetDirectoryName(typeof(Plugin).Assembly.Location);
             bundle = AssetBundle.LoadFromFile(Path.Combine(folder, "building-chunk-windows.bundle"));
             if (!bundle) throw new InvalidOperationException("The spatial building shader bundle is unavailable; rendering stays native.");
@@ -365,7 +390,7 @@ namespace WorldPerformance
                 var copy = loaded.LoadAsset<Shader>("building-buffer.shader");
                 if (copy && copy.isSupported) derived[name] = copy; else supported = false;
             }
-            if (supported && SystemInfo.supportsComputeShaders)
+            if (supported && SystemInfo.supportsComputeShaders && CompactionKernels)
             {
                 compaction = bundle.LoadAsset<ComputeShader>("building-visibility.compute");
                 supported = compaction && compaction.HasKernel("CompactSlots16") && compaction.HasKernel("CompactSlots32");
@@ -445,6 +470,7 @@ namespace WorldPerformance
                 patches.Patch(AccessTools.Method(typeof(StaticPhysics), "Fall"), postfix: new HarmonyMethod(typeof(SpatialBuildings), nameof(Falling)));
                 patches.Patch(AccessTools.Method(typeof(StaticPhysics), "PushUp"), prefix: new HarmonyMethod(typeof(SpatialBuildings), nameof(PushStarting)),
                     postfix: new HarmonyMethod(typeof(SpatialBuildings), nameof(Pushed)));
+                FollowTreeScales();
                 // The visual methods of the behaviours whose pieces merge; a missing method leaves that behaviour's pieces native.
                 var switched = new HarmonyMethod(typeof(SpatialBuildings), nameof(SwitchedVisualChanged));
                 foreach (var entry in switchedBehaviours)
@@ -468,12 +494,25 @@ namespace WorldPerformance
             catch (Exception error) { Fail(error); throw; }
         }
 
+        // Star Level System scales a tree through its transform a second of game time after the tree wakes, which can be after
+        // the tree registers or even merges, and again when its tree settings change; TreeScaled follows it.
+        private const string StarLevelSystemId = "MidnightsFX.StarLevelSystem";
+
+        private static void FollowTreeScales()
+        {
+            if (!Chainloader.PluginInfos.TryGetValue(StarLevelSystemId, out var plugin) || plugin.Instance == null) return;
+            var levels = plugin.Instance.GetType().Assembly.GetType("StarLevelSystem.modules.LevelSystem.TreeLevels");
+            var apply = levels == null ? null : AccessTools.Method(levels, "ApplyScale", new[] { typeof(TreeBase) });
+            if (apply != null) patches.Patch(apply, postfix: new HarmonyMethod(typeof(SpatialBuildings), nameof(TreeScaled)));
+            else Plugin.Fallback("World Performance: Star Level System " + plugin.Metadata.Version + " no longer scales trees in TreeLevels.ApplyScale; trees it scales may draw merged at their earlier size");
+        }
+
         internal static void Stop()
         {
             if (!Running) return;
             Running = false;
             CropsNative = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             Clear();
             StopLights();
             if (skyCamera && skyCommands != null) skyCamera.RemoveCommandBuffer(CameraEvent.AfterForwardOpaque, skyCommands);

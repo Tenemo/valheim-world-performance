@@ -88,13 +88,16 @@ namespace WorldPerformance
         // the scene unloads them, before the frame's budget is set, so that budget makes room for their removal.
         private static void Unloaded(ZNetScene __instance)
         {
+            if (!Running) return;
             var views = unloadedViews(__instance);
-            if (!Running || views.Count == 0) return;
+            if (views.Count == 0) return;
             using (new Timed(RemovalHooks))
                 try
                 {
                     foreach (var view in views)
                     {
+                        // A view destroyed since the scene listed it left with its own destruction.
+                        if (!view) continue;
                         if (natural.TryGetValue(view, out var member)) natural.Remove(view);
                         else if (pieces.Count == 0 || !view.TryGetComponent<WearNTear>(out var wear) || !pieces.TryGetValue(wear, out member)) continue;
                         else pieces.Remove(wear);
@@ -113,8 +116,8 @@ namespace WorldPerformance
         private static void RockChanged(MineRock __instance) => VisibilityChanged(__instance, "mined");
 
         // A behaviour switched objects of its own piece or natural object: its own objects first, which is a few reads and is
-        // most often all, then the renderers only when those changed. An item stand has no switched objects and compares the
-        // renderers directly.
+        // most often all, then the renderers only when those changed. A piece whose switched objects are all missing compares
+        // the renderers directly.
         private static void SwitchedVisualChanged(Component __instance)
         {
             if (!Running || !__instance) return;
@@ -217,6 +220,17 @@ namespace WorldPerformance
             if (Running && __instance.transform.position != __state) Moved(__instance, "pushed up");
         }
 
+        // Star Level System has just set a tree's scale itself: a tree planned at another scale is handed back and planned again.
+        private static void TreeScaled(TreeBase __0)
+        {
+            if (!Running || !__0) return;
+            var member = NaturalOf(__0);
+            if (member == null) return;
+            using (new Timed(VisualHooks))
+                try { if (Moved(member)) HandBack(member, "scale"); }
+                catch (Exception error) { Fail(error); }
+        }
+
         private static void Moved(Component component, string reason)
         {
             if (!Running) return;
@@ -267,21 +281,26 @@ namespace WorldPerformance
             else natural.TryGetValue(__instance, out member);
             if (member == null) return;
             using (new Timed(VisualHooks))
-                try
-                {
-                    foreach (var detail in member.Details) Place(detail);
-                    HandBack(member, "scale");
-                }
+                try { HandBack(member, "scale"); }
                 catch (Exception error) { Fail(error); }
         }
 
         // The material manager has just given the member's native renderers its property block; merged slots follow in the
-        // same frame, and a property the merged shader cannot express hands the member back.
+        // same frame, and a property the merged shader cannot express hands the member back. The member is the one holding
+        // the first of the block's renderers that a record holds: the block also reaches renderers a record leaves out, such
+        // as those under a local behaviour or an item stand's model.
         private static void PropertiesApplied(object __instance)
         {
             if (!Running) return;
             var renderers = containerRenderers(__instance);
-            if (renderers == null || renderers.Count == 0 || !renderers[0] || !rendererMembers.TryGetValue(renderers[0].GetInstanceID(), out var member)) return;
+            if (renderers == null || rendererMembers.Count == 0) return;
+            Member member = null;
+            for (int index = 0; index < renderers.Count && member == null; index++)
+            {
+                var renderer = renderers[index];
+                if (renderer) rendererMembers.TryGetValue(renderer.GetInstanceID(), out member);
+            }
+            if (member == null) return;
             using (new Timed(PropertyHooks))
                 try
                 {
@@ -312,8 +331,9 @@ namespace WorldPerformance
             catch (Exception error) { Fail(error); }
         }
 
-        // Destruction breaks only the renderers the cameras drew into fragments, and a merged member's native renderers are
-        // never drawn, so the visibility test asks whether its merged mesh draws them in the main camera's view instead.
+        // Destruction breaks only the renderers the cameras drew into fragments, shadow passes included, and a merged member's
+        // native renderers are never drawn, so the visibility test asks whether its merged mesh draws them in the main
+        // camera's view, or casts their sun shadows into that view within the shadow distance, instead.
         private static IEnumerable<CodeInstruction> FragmentsFromMerged(IEnumerable<CodeInstruction> instructions)
         {
             var visible = AccessTools.PropertyGetter(typeof(Renderer), nameof(Renderer.isVisible));
@@ -335,7 +355,18 @@ namespace WorldPerformance
             var camera = Utils.GetMainCamera();
             if (!drawn || !camera) return false;
             GeometryUtility.CalculateFrustumPlanes(camera, frustum);
-            return GeometryUtility.TestPlanesAABB(frustum, renderer.bounds);
+            var bounds = renderer.bounds;
+            if (GeometryUtility.TestPlanesAABB(frustum, bounds)) return true;
+            // The sun's shadow passes draw a caster whose shadow can fall into the view up to the shadow distance: its bounds
+            // swept that far away from the sun meet the view cut off there.
+            var sun = EnvMan.instance ? EnvMan.instance.m_dirLight : null;
+            float reach = Mathf.Min(QualitySettings.shadowDistance, camera.farClipPlane);
+            if (!sun || !sun.isActiveAndEnabled || sun.shadows == LightShadows.None || !(reach > 0f) ||
+                SmallFarShadows.NativeShadows(renderer) == UnityEngine.Rendering.ShadowCastingMode.Off) return false;
+            var view = camera.transform;
+            frustum[5] = new Plane(-view.forward, view.position + view.forward * reach);
+            bounds.Encapsulate(new Bounds(bounds.center + sun.transform.forward * reach, bounds.size));
+            return GeometryUtility.TestPlanesAABB(frustum, bounds);
         }
     }
 }
