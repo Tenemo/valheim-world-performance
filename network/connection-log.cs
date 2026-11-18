@@ -16,7 +16,8 @@ namespace WorldPerformance
     // row also asks the player's game how it ran since the last one, and waits up to four seconds for the answer.
     internal static class ConnectionLog
     {
-        private const float SampleSeconds = 5f, AnswerSeconds = 4f;
+        private const float SampleSeconds = 5f;
+        internal const float AnswerSeconds = 4f;
         private enum Kind : byte { Other, Creature, Boss }
         private static AccessTools.FieldRef<ZDOMan, Dictionary<ZDOID, ZDO>> objects;
         private static readonly List<float> frames = new List<float>();

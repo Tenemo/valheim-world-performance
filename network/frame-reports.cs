@@ -21,6 +21,7 @@ namespace WorldPerformance
         internal const string RequestRpc = "WorldPerformance FrameRequest", ReportRpc = "WorldPerformance FrameReport", MachineRpc = "WorldPerformance MachineReport";
         internal const int Protocol = 1;
         private const int Capacity = 8192;
+        private const int FrameReportBytes = 8 * sizeof(int) + 7 * sizeof(float) + sizeof(byte);
 
         [Flags] internal enum Excluded : byte { Loading = 1, Menu = 2, Unfocused = 4 }
 
@@ -51,6 +52,9 @@ namespace WorldPerformance
 
         internal sealed class Report
         {
+            internal int expected;
+            internal bool machineAllowed, machineReceived;
+            internal float expires;
             internal int request, frames, excludedFrames, over33, over50, frameLimit, vsync;
             internal Excluded excluded;
             internal float mean, median, p95, p99, longest, steps, wait;
@@ -59,8 +63,19 @@ namespace WorldPerformance
         // The server's side: the last answer from each player.
         private static readonly Dictionary<long, Report> reports = new Dictionary<long, Report>();
 
-        internal static void Initialize(PerformancePatches patches) =>
+        internal static void Initialize(PerformancePatches patches)
+        {
             patches.Patch(AccessTools.Method(typeof(ZNet), "OnNewConnection"), postfix: new HarmonyMethod(typeof(FrameReports), nameof(Connected)));
+            patches.Patch(AccessTools.Method(typeof(ZDOMan), nameof(ZDOMan.RemovePeer)), prefix: new HarmonyMethod(typeof(FrameReports), nameof(Disconnected)));
+        }
+
+        private static void Disconnected(ZNetPeer netPeer) => reports.Remove(netPeer.m_uid);
+
+        private static bool RequestedReport(ZNetPeer peer, out Report report)
+        {
+            report = null;
+            return peer.IsReady() && Plugin.ConnectionLogging.Value && reports.TryGetValue(peer.m_uid, out report) && Time.unscaledTime <= report.expires;
+        }
 
         private static void Connected(ZNet __instance, ZNetPeer peer)
         {
@@ -125,7 +140,9 @@ namespace WorldPerformance
             Requests++;
             bool continuing = measuring && rpc == server;
             if (continuing) Send(rpc, request);
-            SendMachine(rpc, !continuing);
+            // Older servers send only the request number. A new server asks again if its first machine report timed out.
+            bool needsMachine = package.GetPos() < package.Size() && package.ReadBool();
+            SendMachine(rpc, !continuing || needsMachine, request);
             server = rpc;
             measuring = true;
             // A join can stall long enough for two requests to arrive before the next update; the first frame after a
@@ -200,7 +217,7 @@ namespace WorldPerformance
         }
 
         // At a new connection and whenever the details change, read at each request.
-        private static void SendMachine(ZRpc rpc, bool joined)
+        private static void SendMachine(ZRpc rpc, bool refresh, int request)
         {
             if (machineFailed) return;
             string[] machine;
@@ -211,11 +228,12 @@ namespace WorldPerformance
                 Plugin.Fallback("Machine details unavailable: " + error.GetBaseException().Message);
                 return;
             }
-            if (!joined && LastMachine != null && ((IStructuralEquatable)machine).Equals(LastMachine, StructuralComparisons.StructuralEqualityComparer)) return;
+            if (!refresh && LastMachine != null && ((IStructuralEquatable)machine).Equals(LastMachine, StructuralComparisons.StructuralEqualityComparer)) return;
             var package = new ZPackage();
             package.Write(Protocol);
             package.Write(machine.Length);
             foreach (string value in machine) package.Write(value ?? "");
+            package.Write(request);
             rpc.Invoke(MachineRpc, package);
             LastMachine = machine;
             MachineSent++;
@@ -223,14 +241,20 @@ namespace WorldPerformance
 
         private static void ReceivedMachine(ZNetPeer peer, ZPackage package)
         {
-            if (package.ReadInt() != Protocol || package.ReadInt() != MachineCount) return;
+            if (!RequestedReport(peer, out var report) || !report.machineAllowed) return;
+            report.machineAllowed = false;
+            if (package.Size() < 8 || package.Size() > 32768 || package.ReadInt() != Protocol || package.ReadInt() != MachineCount) return;
             var values = new string[MachineCount];
             for (int index = 0; index < values.Length; index++)
             {
                 string value = package.ReadString();
                 values[index] = value.Length > 128 ? value.Substring(0, 128) : value;
             }
+            // Version 1 clients originally sent no request number.
+            int remaining = package.Size() - package.GetPos();
+            if (remaining != 0 && (remaining != sizeof(int) || package.ReadInt() != report.expected)) return;
             ConnectionLog.WriteMachine(peer.m_uid, values);
+            report.machineReceived = true;
         }
 
         // The same convention as the server's own frame percentiles.
@@ -249,18 +273,22 @@ namespace WorldPerformance
         // The server asks each player at its row; a game without this ignores the request.
         internal static void Ask(ZNetPeer peer, int request)
         {
-            if (peer.m_rpc == null || !peer.m_rpc.IsConnected()) return;
+            if (!peer.IsReady() || peer.m_rpc == null || !peer.m_rpc.IsConnected()) return;
+            if (!reports.TryGetValue(peer.m_uid, out var report)) reports[peer.m_uid] = report = new Report();
+            report.expected = request;
+            report.machineAllowed = true;
+            report.expires = Time.unscaledTime + ConnectionLog.AnswerSeconds;
             var package = new ZPackage();
             package.Write(Protocol);
             package.Write(request);
+            package.Write(!report.machineReceived);
             peer.m_rpc.Invoke(RequestRpc, package);
         }
 
         private static void Received(ZNetPeer peer, ZPackage package)
         {
-            if (package.ReadInt() != Protocol) return;
-            if (!reports.TryGetValue(peer.m_uid, out var report)) reports[peer.m_uid] = report = new Report();
-            report.request = package.ReadInt();
+            if (!RequestedReport(peer, out var report) || report.request == report.expected || package.Size() != FrameReportBytes ||
+                package.ReadInt() != Protocol || package.ReadInt() != report.expected) return;
             report.frames = package.ReadInt();
             report.excludedFrames = package.ReadInt();
             report.excluded = (Excluded)package.ReadByte();
@@ -275,6 +303,7 @@ namespace WorldPerformance
             report.wait = package.ReadSingle();
             report.frameLimit = package.ReadInt();
             report.vsync = package.ReadInt();
+            report.request = report.expected;
         }
 
         internal static bool Answered(long uid, int request) => reports.TryGetValue(uid, out var report) && report.request == request;

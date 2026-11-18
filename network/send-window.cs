@@ -22,7 +22,6 @@ namespace WorldPerformance
         private const int GameWindow = 10240;
         private const int LargestWindow = 256 * 1024;
         private const int ReturnMilliseconds = 100;
-        private const int SmallestRate = 64;
         private static ManualLogSource logger;
         private static MethodInfo networkBudget;
         private static int sharedRate;
@@ -85,7 +84,7 @@ namespace WorldPerformance
             }
             var peers = PeerConnections.UpdatePeers();
             int players = Math.Max(1, peers == null ? 0 : peers.Count);
-            int share = Math.Max(SmallestRate, Math.Min(Plugin.ServerSendRate.Value, Plugin.UploadBudget.Value / players));
+            int share = Math.Min(Plugin.ServerSendRate.Value * 1024, Plugin.UploadBudget.Value * 1024 / players);
             if (share == sharedRate) return;
             bool applied = SetRate(ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Global, IntPtr.Zero, share);
             if (peers != null)
@@ -100,13 +99,13 @@ namespace WorldPerformance
             else
             {
                 sharedRate = share;
-                logger.LogInfo($"Object updates are sent to each of {players} player(s) at {share} KiB/s.");
+                logger.LogInfo($"Object updates are sent to each of {players} player(s) at {share / 1024.0:F2} KiB/s.");
             }
         }
 
-        private static bool SetRate(ESteamNetworkingConfigScope scope, IntPtr target, int kibibytes)
+        private static bool SetRate(ESteamNetworkingConfigScope scope, IntPtr target, int bytesPerSecond)
         {
-            var rate = GCHandle.Alloc(kibibytes * 1024, GCHandleType.Pinned);
+            var rate = GCHandle.Alloc(bytesPerSecond, GCHandleType.Pinned);
             try
             {
                 // The maximum first, so the minimum never exceeds it.

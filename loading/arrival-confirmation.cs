@@ -23,8 +23,15 @@ namespace WorldPerformance
         private static readonly List<(ZNetPeer peer, int id, Vector2s zone, float since)> waiting = new List<(ZNetPeer, int, Vector2s, float)>();
         private static readonly List<ZDO> records = new List<ZDO>();
         private static readonly AccessTools.FieldRef<ZoneSystem, HashSet<Vector2s>> generated = AccessTools.FieldRefAccess<ZoneSystem, HashSet<Vector2s>>("m_generatedZones");
-        private static System.Reflection.FieldInfo peerRecords;
-        private static Func<object, ZDOID, bool> known;
+        private static readonly Func<object, ZDO, bool> shouldSend = Bridges.Make<Func<object, ZDO, bool>>(typeof(bool), new[] { typeof(object), typeof(ZDO) }, il =>
+        {
+            var peer = AccessTools.Inner(typeof(ZDOMan), "ZDOPeer");
+            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+            il.Emit(System.Reflection.Emit.OpCodes.Castclass, peer);
+            il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
+            il.Emit(System.Reflection.Emit.OpCodes.Callvirt, AccessTools.Method(peer, "ShouldSend"));
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+        });
         private static int asked, answered, lastLoading, spawnAsked;
         private static readonly AccessTools.FieldRef<Game, float> respawnWait = AccessTools.FieldRefAccess<Game, float>("m_respawnWait");
         private static readonly AccessTools.FieldRef<Game, bool> respawnAfterDeath = AccessTools.FieldRefAccess<Game, bool>("m_respawnAfterDeath");
@@ -32,8 +39,6 @@ namespace WorldPerformance
         // The isolated test client sets false to leave the reference position to the game's 2 s update.
         internal static bool SendNow = true;
         private static readonly Action<ZNet, ZNetPeer> sendPlayerData = AccessTools.MethodDelegate<Action<ZNet, ZNetPeer>>(AccessTools.Method(typeof(ZNet), "SendServerSyncPlayerData"));
-
-        private static bool Knows<TInfo>(object map, ZDOID id) => ((Dictionary<ZDOID, TInfo>)map).ContainsKey(id);
 
         [HarmonyPatch(typeof(ZNet), "OnNewConnection")]
         private static class Connection
@@ -59,13 +64,7 @@ namespace WorldPerformance
             {
                 if (waiting.Count == 0 || Time.unscaledTime < nextCheck) return;
                 nextCheck = Time.unscaledTime + 0.1f;
-                if (known == null)
-                {
-                    PeerConnections.Initialize();
-                    peerRecords = AccessTools.Field(AccessTools.Inner(typeof(ZDOMan), "ZDOPeer"), "m_zdos");
-                    known = (Func<object, ZDOID, bool>)Delegate.CreateDelegate(typeof(Func<object, ZDOID, bool>),
-                        AccessTools.Method(typeof(ArrivalConfirmation), nameof(Knows)).MakeGenericMethod(peerRecords.FieldType.GetGenericArguments()[1]));
-                }
+                PeerConnections.Initialize();
                 var peers = PeerConnections.UpdatePeers();
                 for (int index = waiting.Count - 1; index >= 0; index--)
                 {
@@ -87,7 +86,7 @@ namespace WorldPerformance
         private static bool AllSent(ZDOMan manager, object updatePeer, Vector2s zone)
         {
             var zones = generated(ZoneSystem.instance);
-            var setting = simulation(ZoneSystem.instance);
+            var setting = PeerConnections.Peer(updatePeer).m_simulationDistance;
             int near = setting.NearSimulationDistance;
             for (int y = zone.y - near; y <= zone.y + near; y++)
                 for (int x = zone.x - near; x <= zone.x + near; x++)
@@ -97,10 +96,9 @@ namespace WorldPerformance
                 }
             records.Clear();
             manager.FindSectorObjects(zone, new SimulationDistance(near, 0, setting.IsClassic), records);
-            object map = peerRecords.GetValue(updatePeer);
             bool sent = true;
             foreach (var record in records)
-                if (record.Type >= ZDO.ObjectType.Solid && !known(map, record.m_uid)) { sent = false; break; }
+                if (record.Type >= ZDO.ObjectType.Solid && shouldSend(updatePeer, record)) { sent = false; break; }
             records.Clear();
             return sent;
         }
