@@ -27,7 +27,16 @@ namespace WorldPerformance
             log.LogInfo("Better Beehives finds its pollination targets without searching every object.");
         }
 
-        private static void Woke(MonoBehaviour __instance) => Targets.Add(__instance);
+        // Destroyed targets also leave as the list doubles, so a player whose hives never search keeps no unloaded targets.
+        private static int pruneAt = 256;
+
+        private static void Woke(MonoBehaviour __instance)
+        {
+            Targets.Add(__instance);
+            if (Targets.Count < pruneAt) return;
+            Targets.RemoveAll(target => !target);
+            pruneAt = Math.Max(256, Targets.Count * 2);
+        }
 
         // As the engine's search does, this skips inactive objects; a destroyed target leaves the list here.
         private static bool Search(Beehive beehive, float radius, ref List<GameObject> __result)

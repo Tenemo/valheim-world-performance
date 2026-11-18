@@ -14,7 +14,9 @@ namespace WorldPerformance
     // whose description could match, in the game and the installed mods, now marks while it runs. A check with none of them
     // running cannot match, so it skips the mod's search and gets the game's own answer, as the mod would give it; checks
     // inside them still go through the mod unchanged. The methods are found from the assemblies' metadata names first, so
-    // reflection reads only the few types those name: 0.4 s of the start against 2.6 s for reading every type.
+    // reflection reads only the few types those name: 0.4 s against 2.6 s for reading every type. They are found once the
+    // main menu first loads, when every plugin and the assemblies plugins load beside them are in, and until then every check
+    // goes through the mod. A matching method that cannot be marked, a generic one, leaves every check to the mod.
     internal static class SwimmingEquipmentChecks
     {
         // The isolated test client sets false to compare the mod's own search on every check.
@@ -23,6 +25,8 @@ namespace WorldPerformance
         internal static int Marked;
         [ThreadStatic] private static int running;
         private static readonly string[] Names = { "UpdateEquipment", "EquipItem" };
+        private static readonly Harmony marks = new Harmony(Plugin.Id + ".swimming-marks");
+        private static bool marked, tried;
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -30,20 +34,56 @@ namespace WorldPerformance
             var check = AccessTools.Method(plugin.Instance.GetType().Assembly.GetType("WieldEquipmentWhileSwimming.Plugin+Patches"), "IsSwimming_Prefix")
                 ?? throw new MissingMethodException("WieldEquipmentWhileSwimming's swimming check was not found.");
             harmony.Patch(check, prefix: new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Skip)));
-            var enter = new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Enter)) { priority = Priority.First };
-            var leave = new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Leave)) { priority = Priority.Last };
-            foreach (var method in Matching()) { harmony.Patch(method, prefix: enter, finalizer: leave); Marked++; }
+            harmony.Patch(AccessTools.Method(typeof(FejdStartup), "Awake"), postfix: new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Mark)));
+            harmony.Defer(() => { }, () => { marks.UnpatchOwner(); marked = false; Marked = 0; });
+        }
+
+        private static void Mark()
+        {
+            if (tried) return;
+            tried = true;
+            try
+            {
+                var found = Matching(out var unmarkable);
+                if (unmarkable != null)
+                {
+                    Plugin.Fallback("WieldEquipmentWhileSwimming's swimming checks all search their callers: " + unmarkable + " could match and cannot be marked.");
+                    return;
+                }
+                var enter = new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Enter)) { priority = Priority.First };
+                var leave = new HarmonyMethod(typeof(SwimmingEquipmentChecks), nameof(Leave)) { priority = Priority.Last };
+                foreach (var method in found) { marks.Patch(method, prefix: enter, finalizer: leave); Marked++; }
+                marked = true;
+            }
+            catch (Exception error)
+            {
+                marks.UnpatchOwner();
+                Marked = 0;
+                Plugin.Fallback("WieldEquipmentWhileSwimming's swimming checks all search their callers: " + error.GetBaseException().Message);
+            }
         }
 
         // The game's and the plugins' methods whose stack trace description names either method: their declaring type,
         // name, return type, parameter types or parameter names contain it. Members that refer to an assembly that is not
         // installed cannot run, so they are left out. The isolated test client compares the scan of every type, prefilter
         // false.
-        internal static List<MethodBase> Matching(bool prefilter = true)
+        internal static List<MethodBase> Matching(bool prefilter = true) => Matching(out _, prefilter);
+
+        private static List<MethodBase> Matching(out string unmarkable, bool prefilter = true)
         {
+            unmarkable = null;
             var found = new List<MethodBase>();
             var assemblies = new HashSet<Assembly> { typeof(Humanoid).Assembly };
             foreach (var info in Chainloader.PluginInfos.Values) if (info.Instance != null) assemblies.Add(info.Instance.GetType().Assembly);
+            // Assemblies plugins load from their own folders, such as helper libraries, run their methods too.
+            string plugins = System.IO.Path.GetFullPath(BepInEx.Paths.PluginPath);
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                try
+                {
+                    if (!assembly.IsDynamic && !string.IsNullOrEmpty(assembly.Location) && System.IO.Path.GetFullPath(assembly.Location).StartsWith(plugins, StringComparison.OrdinalIgnoreCase))
+                        assemblies.Add(assembly);
+                }
+                catch (NotSupportedException) { }
             // Reflection writes the assemblies of generic arguments into type names; an assembly whose name holds either
             // name could make such a type match without its metadata naming it.
             if (AppDomain.CurrentDomain.GetAssemblies().Any(assembly => Matches(assembly.FullName))) prefilter = false;
@@ -54,11 +94,7 @@ namespace WorldPerformance
                 foreach (var type in candidates == null ? AllTypes(assembly) : Resolve(assembly, candidates))
                 {
                     MethodBase[] methods;
-                    try
-                    {
-                        if (type.ContainsGenericParameters) continue;
-                        methods = type.GetMethods(all).Cast<MethodBase>().Concat(type.GetConstructors(all)).ToArray();
-                    }
+                    try { methods = type.GetMethods(all).Cast<MethodBase>().Concat(type.GetConstructors(all)).ToArray(); }
                     catch (Exception error) when (Unresolved(error)) { continue; }
                     bool typeMatches = Matches(type.FullName);
                     foreach (var method in methods)
@@ -66,7 +102,10 @@ namespace WorldPerformance
                         {
                             if (!typeMatches && !Matches(method.Name) && !(method is MethodInfo info && Matches(info.ReturnType.FullName)) &&
                                 !method.GetParameters().Any(parameter => Matches(parameter.Name) || Matches(parameter.ParameterType.FullName))) continue;
-                            if (!method.IsAbstract && !method.ContainsGenericParameters && method.GetMethodBody() != null) found.Add(method);
+                            if (method.IsAbstract || method.GetMethodBody() == null) continue;
+                            // A generic method or a method of a generic type runs as copies Harmony cannot mark.
+                            if (method.ContainsGenericParameters || type.ContainsGenericParameters) { if (unmarkable == null) unmarkable = type.FullName + "." + method.Name; continue; }
+                            found.Add(method);
                         }
                         catch (Exception error) when (Unresolved(error)) { }
                 }
@@ -132,7 +171,7 @@ namespace WorldPerformance
         private static bool Skip(Humanoid __0, float __1, ref bool __result)
         {
             if (!(__1 < 0.5f) || !__0.IsPlayer()) { __result = true; return false; }
-            if (!Skipping || running > 0) { Searched++; return true; }
+            if (!Skipping || !marked || running > 0) { Searched++; return true; }
             Skipped++;
             __result = true;
             return false;
