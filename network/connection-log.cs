@@ -31,6 +31,7 @@ namespace WorldPerformance
         private static float nextSample, writeBy;
         private static int request;
         private static bool failed, reportedUnmeasured;
+        private static float nextWriteWarning;
 
         // A boss altar's offering goes from the offering player's game through the server to the game that owns the altar,
         // which starts the boss's countdown and answers; the server passes these on, or drops one silently when the owner is
@@ -78,11 +79,7 @@ namespace WorldPerformance
                 File.AppendAllText(Path.Combine(folder, "altars.csv"), rows.ToString());
                 rows.Length = 0;
             }
-            catch (Exception error)
-            {
-                failed = true;
-                Plugin.Log.LogError("The connection log stopped: " + error.GetBaseException().Message);
-            }
+            catch (Exception error) { Stopped(error); }
         }
 
         internal static void LateUpdate()
@@ -97,18 +94,31 @@ namespace WorldPerformance
                 var peers = PeerConnections.UpdatePeers();
                 if (peers != null && peers.Count > 0 && ZDOMan.instance != null) Write(peers);
             }
-            catch (Exception error)
-            {
-                failed = true;
-                Plugin.Log.LogError("The connection log stopped: " + error.GetBaseException().Message);
-            }
+            catch (Exception error) { Stopped(error); }
             frames.Clear();
         }
 
+        // A file another program holds without sharing, or a full disk, loses these rows and the log goes on, with a warning at
+        // most once a minute; any other error stops the log.
+        private static void Stopped(Exception error)
+        {
+            rows.Length = 0;
+            if (error is IOException || error is UnauthorizedAccessException)
+            {
+                if (Time.unscaledTime < nextWriteWarning) return;
+                nextWriteWarning = Time.unscaledTime + 60f;
+                Plugin.Log.LogWarning("The connection log could not write its rows and goes on: " + error.Message);
+                return;
+            }
+            failed = true;
+            Plugin.Log.LogError("The connection log stopped: " + error.GetBaseException().Message);
+        }
+
+        // The folder is kept only once it and its headers exist, so a failed start is tried again at the next row.
         private static void Open()
         {
-            if (folder != null) return;
-            folder = Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), "network-log",
+            if (ConnectionLog.folder != null) return;
+            string folder = Path.Combine(Utils.GetSaveDataPath(FileHelpers.FileSource.Local), "network-log",
                 DateTime.Now.ToString("yyyy-MM-dd_HHmmss", CultureInfo.InvariantCulture));
             Directory.CreateDirectory(folder);
             File.WriteAllText(Path.Combine(folder, "connections.csv"),
@@ -116,6 +126,7 @@ namespace WorldPerformance
             File.WriteAllText(Path.Combine(folder, "bosses.csv"), "time,boss,owner,creator,distance_m\n");
             File.WriteAllText(Path.Combine(folder, "altars.csv"), "time,request,sender,target,delivery,altar_owner,zone_x,zone_z\n");
             File.WriteAllText(Path.Combine(folder, "players.csv"), "time,player," + FrameReports.MachineColumns + "\n");
+            ConnectionLog.folder = folder;
             Plugin.Log.LogInfo("The connection log is in " + folder + ".");
         }
 
@@ -186,11 +197,7 @@ namespace WorldPerformance
                 foreach (string value in values) row.Append(',').Append(Quoted(value.Replace('\n', ' ').Replace('\r', ' ')));
                 File.AppendAllText(Path.Combine(folder, "players.csv"), row.Append('\n').ToString());
             }
-            catch (Exception error)
-            {
-                failed = true;
-                Plugin.Log.LogError("The connection log stopped: " + error.GetBaseException().Message);
-            }
+            catch (Exception error) { Stopped(error); }
         }
 
         private static bool AllAnswered()

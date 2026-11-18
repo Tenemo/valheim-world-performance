@@ -198,7 +198,7 @@ namespace WorldPerformance
                 new ConfigDescription("Dedicated server only: KiB per second for all players together, divided equally among them, which no player's rate exceeds. Keep it within the server's upload capacity; the connection log's out_kib_s, ping_ms and quality columns show when it is too high.",
                     new AcceptableValueRange<int>(256, 16384)));
             ConnectionLogging = Config.Bind("Network", "Connection log", true,
-                "Dedicated server only: record each player's connection, the creatures they simulate, how smoothly their game runs and the server's frame times every five seconds, and each player's machine and graphics settings, in a network-log folder beside the saves.");
+                "Dedicated server only: record each player's connection, the zone they are in, the creatures they simulate, how smoothly their game runs and the server's frame times every five seconds, each player's machine and graphics settings, each boss altar offering and which player's game created each boss, in a network-log folder beside the saves.");
         }
 
         private void BeforeCamera(Camera camera)

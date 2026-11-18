@@ -242,7 +242,6 @@ namespace WorldPerformance
         private static void ReceivedMachine(ZNetPeer peer, ZPackage package)
         {
             if (!RequestedReport(peer, out var report) || !report.machineAllowed) return;
-            report.machineAllowed = false;
             if (package.Size() < 8 || package.Size() > 32768 || package.ReadInt() != Protocol || package.ReadInt() != MachineCount) return;
             var values = new string[MachineCount];
             for (int index = 0; index < values.Length; index++)
@@ -253,6 +252,8 @@ namespace WorldPerformance
             // Version 1 clients originally sent no request number.
             int remaining = package.Size() - package.GetPos();
             if (remaining != 0 && (remaining != sizeof(int) || package.ReadInt() != report.expected)) return;
+            // Only a valid answer to the current request uses up its one write; a late answer to an older one leaves it.
+            report.machineAllowed = false;
             ConnectionLog.WriteMachine(peer.m_uid, values);
             report.machineReceived = true;
         }
