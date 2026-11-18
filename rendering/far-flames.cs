@@ -34,7 +34,8 @@ namespace WorldPerformance
             internal ParticleSystemRenderer FlameRenderer, GlowRenderer;
             internal Vector3 Place, FlamePosition;
             internal Vector2Int Area;
-            internal float Rate, Lifetime, Since;
+            // Minimum is the flame's smallest particle size as it registered, before any camera drew it.
+            internal float Rate, Lifetime, Since, Minimum;
             internal bool Shared, Hidden, Distant;
             internal ParticleSystem.Particle GlowParticle;
             internal Group FlameGroup, GlowGroup;
@@ -45,10 +46,10 @@ namespace WorldPerformance
             internal ParticleSystem System;
             internal readonly List<Torch> Members = new List<Torch>();
             internal bool Changed;
-            // For flame copies: the points it emits from, the rate and lifetime of one torch's flame, and when it lost its last
-            // torch.
+            // For flame copies: the points it emits from, the rate, lifetime and native smallest particle size of one torch's
+            // flame, and when it lost its last torch.
             internal Mesh Places;
-            internal float Rate, Lifetime, Emptied;
+            internal float Rate, Lifetime, Minimum, Emptied;
         }
 
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".far-flames");
@@ -59,7 +60,7 @@ namespace WorldPerformance
         private static int next;
         private static readonly Dictionary<(string type, Vector2Int area, bool far), Group> flames = new Dictionary<(string, Vector2Int, bool), Group>();
         private static readonly Dictionary<(string type, Vector2Int area), Group> glows = new Dictionary<(string, Vector2Int), Group>();
-        private static readonly Dictionary<string, (GameObject flame, GameObject glow)> templates = new Dictionary<string, (GameObject, GameObject)>();
+        private static readonly Dictionary<string, (GameObject flame, GameObject glow, float minimum)> templates = new Dictionary<string, (GameObject, GameObject, float)>();
         private static readonly List<Torch> gone = new List<Torch>();
         private static readonly List<(string, Vector2Int, bool)> idleFlames = new List<(string, Vector2Int, bool)>();
         private static readonly List<(string, Vector2Int)> emptyGlows = new List<(string, Vector2Int)>();
@@ -67,8 +68,9 @@ namespace WorldPerformance
         private static readonly List<int> indices = new List<int>();
         private static ParticleSystem.Particle[] buffer = new ParticleSystem.Particle[256];
         private static GameObject root, inactive;
+        // Progression Fix's screen minimum at the far band's distance, before each type's own minimum is taken into account.
         private static float farMinimum;
-        // The far band's share of Progression Fix's three-pixel minimum, a constant.
+        // The far band's share of Progression Fix's screen minimum, a constant.
         private static readonly float farBlend = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(80f, 160f, 150f));
         // Set once Progression Fix is found; an installed plugin never leaves the list.
         private static bool progressionFix;
@@ -87,6 +89,7 @@ namespace WorldPerformance
             inactive.SetActive(false);
             inactive.transform.SetParent(root.transform, false);
             patches.Patch(AccessTools.Method(typeof(Fireplace), "Start"), postfix: new HarmonyMethod(typeof(FarFlames), nameof(Started)));
+            patches.Patch(AccessTools.Method(typeof(SoftReferencePrefabSpawner), "SpawnPrefab"), postfix: new HarmonyMethod(typeof(FarFlames), nameof(Spawned)));
             foreach (var fire in UnityEngine.Object.FindObjectsByType<Fireplace>(FindObjectsSortMode.None)) Register(fire);
         }
 
@@ -95,7 +98,7 @@ namespace WorldPerformance
         {
             if (!Enabled) return;
             Enabled = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             foreach (var torch in torches.Values) Restore(torch);
             foreach (var group in flames.Values)
                 if (group.Places) UnityEngine.Object.Destroy(group.Places);
@@ -109,6 +112,14 @@ namespace WorldPerformance
         }
 
         private static void Started(Fireplace __instance) => Register(__instance);
+
+        // Some torches load their flame beside a placeholder after Fireplace.Start, so they register once it is there.
+        // An error here would stop the game's spawner before it removes its placeholder, so it stops this feature instead.
+        private static void Spawned(SoftReferencePrefabSpawner __instance)
+        {
+            try { Register(__instance.GetComponentInParent<Fireplace>()); }
+            catch (Exception error) { Fail(error); }
+        }
 
         // A torch whose lit object holds a flame system with a glow child; other fires keep their own systems.
         private static void Register(Fireplace fire)
@@ -126,7 +137,7 @@ namespace WorldPerformance
             {
                 Fire = fire, Holder = fire.m_enabledObject, Type = Utils.GetPrefabName(fire.gameObject) + "/" + flame.name, Place = fire.transform.position,
                 Flame = flame, Glow = glow, FlameRenderer = flame.GetComponent<ParticleSystemRenderer>(), GlowRenderer = glow.GetComponent<ParticleSystemRenderer>(),
-                Rate = flame.emission.rateOverTime.constant,
+                Rate = flame.emission.rateOverTime.constant, Minimum = flame.GetComponent<ParticleSystemRenderer>().minParticleSize,
                 Lifetime = lifetime.mode == ParticleSystemCurveMode.TwoConstants ? lifetime.constantMax : lifetime.mode == ParticleSystemCurveMode.Constant ? lifetime.constant : lifetime.curveMultiplier
             };
             torches.Add(fire, torch);
@@ -137,12 +148,14 @@ namespace WorldPerformance
         {
             if (!Enabled) return;
             try { Advance(); }
-            catch (Exception error)
-            {
-                Failure = error.ToString();
-                Plugin.Log.LogError(error);
-                Stop();
-            }
+            catch (Exception error) { Fail(error); }
+        }
+
+        private static void Fail(Exception error)
+        {
+            Failure = error.ToString();
+            Plugin.Log.LogError(error);
+            Stop();
         }
 
         private static void Advance()
@@ -324,23 +337,38 @@ namespace WorldPerformance
                 shape.randomDirectionAmount = 1f;
                 // Glows of a group sort among themselves as the game sorts their separate systems, farthest first.
                 glowTemplate.GetComponent<ParticleSystemRenderer>().sortMode = ParticleSystemSortMode.Distance;
-                templates.Add(torch.Type, pair = (flameTemplate, glowTemplate));
+                // The torch the template comes from may carry Progression Fix's minimum for its own distance; copies start from
+                // the flame's own.
+                float minimum = NativeMinimum(torch);
+                flameTemplate.GetComponent<ParticleSystemRenderer>().minParticleSize = minimum;
+                templates.Add(torch.Type, pair = (flameTemplate, glowTemplate, minimum));
             }
             var copy = UnityEngine.Object.Instantiate(flame ? pair.flame : pair.glow, inactive.transform, false);
             copy.name = (flame ? "flames " : "glows ") + torch.Type + " " + torch.Area + (flame && torch.Distant ? " far" : "");
             copy.transform.SetPositionAndRotation(new Vector3((torch.Area.x + .5f) * AreaSize, torch.FlamePosition.y, (torch.Area.y + .5f) * AreaSize), Quaternion.identity);
             copy.transform.localScale = Vector3.one;
             copy.transform.SetParent(root.transform, true);
-            var group = new Group { System = copy.GetComponent<ParticleSystem>(), Rate = torch.Rate, Lifetime = torch.Lifetime };
+            var group = new Group { System = copy.GetComponent<ParticleSystem>(), Rate = torch.Rate, Lifetime = torch.Lifetime, Minimum = pair.minimum };
             if (flame)
             {
                 group.Places = new Mesh { name = copy.name };
                 var shape = group.System.shape;
                 shape.mesh = group.Places;
-                if (torch.Distant) group.System.GetComponent<ParticleSystemRenderer>().minParticleSize = farMinimum;
+                if (torch.Distant) group.System.GetComponent<ParticleSystemRenderer>().minParticleSize = Mathf.Max(group.Minimum, farMinimum);
             }
             group.System.Play(false);
             return group;
+        }
+
+        // The flame's smallest particle size in the torch's prefab. A flame the torch loads beside a placeholder is not in the
+        // prefab; its size as it registered, at its start or spawn before any camera drew it, is its own.
+        private static float NativeMinimum(Torch torch)
+        {
+            var prefab = ZNetScene.instance ? ZNetScene.instance.GetPrefab(Utils.GetPrefabName(torch.Fire.gameObject)) : null;
+            if (prefab)
+                foreach (var renderer in prefab.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                    if (renderer.name == torch.Flame.name) return renderer.minParticleSize;
+            return torch.Minimum;
         }
 
         // The copy emits from its torches' places, relative to itself, at as many torches' rate.
@@ -378,17 +406,20 @@ namespace WorldPerformance
             group.System.SetParticles(buffer, group.Members.Count);
         }
 
-        // Progression Fix keeps distant torch flames at least three pixels tall from 160 m, blending in from 80 m; the far band
-        // takes its size at 150 m. Without Progression Fix the copies keep the game's own sizes.
+        // Progression Fix keeps distant torch flames at least three pixels tall with antialiasing and four without from 160 m,
+        // blending in from 80 m, and never below the flame's own minimum; the far band takes its size at 150 m. Without
+        // Progression Fix the copies keep the game's own sizes.
         internal static void BeforeCamera(Camera camera)
         {
             if (!Enabled || camera != Utils.GetMainCamera()) return;
             if (!progressionFix && !(progressionFix = Chainloader.PluginInfos.ContainsKey("valheim.epiclootprogressionfix"))) return;
-            float minimum = 3f / Mathf.Max(1, camera.pixelHeight) * farBlend;
+            var graphics = GraphicsSettingsManager.Instance;
+            bool antialiasing = graphics != null && graphics.ActiveSettings.m_antiAliasing;
+            float minimum = (antialiasing ? 3f : 4f) / Mathf.Max(1, camera.pixelHeight) * farBlend;
             if (minimum == farMinimum) return;
             farMinimum = minimum;
             foreach (var pair in flames)
-                if (pair.Key.far && pair.Value.System) pair.Value.System.GetComponent<ParticleSystemRenderer>().minParticleSize = minimum;
+                if (pair.Key.far && pair.Value.System) pair.Value.System.GetComponent<ParticleSystemRenderer>().minParticleSize = Mathf.Max(pair.Value.Minimum, minimum);
         }
 
         internal static string Report()

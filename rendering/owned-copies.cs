@@ -11,14 +11,23 @@ namespace WorldPerformance
     // the hourly asset unload: the combined mesh of each mineable rock, the body material VisEquipment reads on each
     // humanoid, the materials of each piece or creature with a colour variation, the mesh of each weapon's swing trail, and
     // with Star Level System the coloured copy of each creature's body material. Each copy now goes with the networked object
-    // that made it, and a trail's with its weapon. A placement ghost's copies stay with the asset unload: the player keeps
-    // them after their ghost is gone, and PlantEasily's extra ghosts draw them too. A copy
+    // that made it, and a trail's with its weapon. A colour variation that changes again replaces its renderer's copy with a
+    // new one, so the copy it replaced goes at once. The fragments an object breaks into draw its materials for two or three
+    // seconds after it is gone, so its copies then go four seconds after it. A placement ghost's copies stay with the asset unload: the
+    // player keeps them after their ghost is gone, and PlantEasily's extra ghosts draw them too. A copy
     // several objects hold goes with the last of them, and nothing loaded from the game's files is ever destroyed: those
     // have positive instance ids, copies made while playing negative ones.
     internal static class OwnedCopies
     {
+        // Destructible.CreateFragments gives each fragment a TimedDestruction of Random.Range(2, 4) whole seconds, so 3 s at
+        // most; the copies its fragments draw wait a second longer.
+        private const float FragmentSeconds = 4f;
         private static readonly Dictionary<int, List<Object>> byOwner = new Dictionary<int, List<Object>>();
         private static readonly Dictionary<int, int> holders = new Dictionary<int, int>();
+        // The renderer each colour variation copy was made for, by the copy's instance id.
+        private static readonly Dictionary<int, Renderer> madeFor = new Dictionary<int, Renderer>();
+        // Owners that broke into fragments and go at the end of this frame.
+        private static readonly HashSet<int> fragmented = new HashSet<int>();
         // Views that remove themselves as they wake, as on a placement ghost, a menu character or an icon render: their object
         // stays, so nothing is released with them.
         private static readonly HashSet<int> leaving = new HashSet<int>();
@@ -49,24 +58,42 @@ namespace WorldPerformance
             foreach (var method in new[] { "CheckMaterial", "UpdateMaterial" })
                 harmony.Patch(AccessTools.Method(typeof(MaterialVariation), method), prefix: Handler(nameof(EnterVariation)), finalizer: Handler(nameof(LeaveVariation)));
             harmony.Patch(AccessTools.Method(typeof(Renderer), "GetMaterialArray"), prefix: Handler(nameof(BeforeMaterials)), postfix: Handler(nameof(OwnVariationCopies)));
+            // A destroyed piece or object's fragments draw its renderers' materials after it is gone.
+            Patch(typeof(Destructible), nameof(Destructible.CreateFragments), nameof(Fragmenting), null);
             // A swing trail makes its mesh as it starts and destroys only the trail object drawing it.
             Patch(typeof(MeleeWeaponTrail), "Start", null, nameof(OwnTrailMesh));
             harmony.Defer(() => Ready = true, () => Ready = false);
         }
 
         // Records a runtime copy as one the networked object around the component holds.
-        internal static void Own(Component on, Object copy)
+        internal static void Own(Component on, Object copy) => Add(on, copy);
+
+        // The owner's view id, or 0 when nothing owns the copy.
+        private static int Add(Component on, Object copy)
         {
-            if (!Releasing || !copy || copy.GetInstanceID() >= 0 || !on) return;
+            if (!Releasing || !copy || copy.GetInstanceID() >= 0 || !on) return 0;
             var view = on.GetComponentInParent<ZNetView>(true);
-            if (!view || ViewLeaves() || leaving.Contains(view.GetInstanceID())) return;
+            if (!view || ViewLeaves() || leaving.Contains(view.GetInstanceID())) return 0;
             int owner = view.GetInstanceID();
             if (!byOwner.TryGetValue(owner, out var copies)) byOwner[owner] = copies = new List<Object>(2);
-            foreach (var held in copies) if (ReferenceEquals(held, copy)) return;
+            foreach (var held in copies) if (ReferenceEquals(held, copy)) return owner;
             copies.Add(copy);
             int id = copy.GetInstanceID();
             holders[id] = holders.TryGetValue(id, out int count) ? count + 1 : 1;
             Owned++;
+            return owner;
+        }
+
+        // Lets one holder go; the last destroys the copy, later when fragments may still draw it.
+        private static void Free(Object copy, float delay)
+        {
+            int id = copy.GetInstanceID();
+            if (holders.TryGetValue(id, out int count) && count > 1) { holders[id] = count - 1; return; }
+            holders.Remove(id);
+            madeFor.Remove(id);
+            if (!copy) return;
+            Object.Destroy(copy, delay);
+            Released++;
         }
 
         // ZNetView.Awake removes the view when objects are made without the network: ghosts, previews and the menu.
@@ -80,15 +107,18 @@ namespace WorldPerformance
         private static void Release(ZNetView __instance)
         {
             if (leaving.Count > 0) leaving.Remove(__instance.GetInstanceID());
+            float delay = fragmented.Count > 0 && fragmented.Remove(__instance.GetInstanceID()) ? FragmentSeconds : 0f;
             if (byOwner.Count == 0 || !byOwner.TryGetValue(__instance.GetInstanceID(), out var copies)) return;
             byOwner.Remove(__instance.GetInstanceID());
-            foreach (var copy in copies)
-            {
-                int id = copy.GetInstanceID();
-                if (holders.TryGetValue(id, out int count) && count > 1) { holders[id] = count - 1; continue; }
-                holders.Remove(id);
-                if (copy) { Object.Destroy(copy); Released++; }
-            }
+            foreach (var copy in copies) Free(copy, delay);
+        }
+
+        // Fragments take the materials of the object's renderers as they are, so its copies wait for them.
+        private static void Fragmenting(GameObject rootObject)
+        {
+            if (byOwner.Count == 0 || !rootObject) return;
+            var view = rootObject.GetComponentInParent<ZNetView>(true);
+            if (view && byOwner.ContainsKey(view.GetInstanceID())) fragmented.Add(view.GetInstanceID());
         }
 
         private static void OwnRockMesh(MineRock5 __instance)
@@ -123,12 +153,33 @@ namespace WorldPerformance
         private static void BeforeMaterials(Renderer __instance, out Material[] __state) =>
             __state = variation is object && ReferenceEquals(__instance, variationRenderer(variation)) ? __instance.sharedMaterials : null;
 
-        // Owns what the getter just copied: the materials it returns that the renderer did not hold before.
+        // Owns what the getter just copied: the materials it returns that the renderer did not hold before. MaterialVariation
+        // puts its variation's material into the slot of the copy the getter made, then reads the materials again, which
+        // copies the variation's material; the copy it replaced, drawn by nothing, goes. Only the owner's copies made for this
+        // renderer are looked at, a few at most.
         private static void OwnVariationCopies(Renderer __instance, Material[] __result, Material[] __state)
         {
             if (__state == null || __result == null) return;
+            int owner = 0;
             foreach (var material in __result)
-                if (material && Array.IndexOf(__state, material) < 0) Own(__instance, material);
+            {
+                if (!material || Array.IndexOf(__state, material) >= 0) continue;
+                int added = Add(__instance, material);
+                if (added == 0) continue;
+                owner = added;
+                madeFor[material.GetInstanceID()] = __instance;
+            }
+            if (owner == 0) return;
+            var copies = byOwner[owner];
+            float delay = fragmented.Contains(owner) ? FragmentSeconds : 0f;
+            for (int index = copies.Count - 1; index >= 0; index--)
+            {
+                var copy = copies[index];
+                if (!madeFor.TryGetValue(copy.GetInstanceID(), out var renderer) || !ReferenceEquals(renderer, __instance) ||
+                    copy is Material drawn && Array.IndexOf(__result, drawn) >= 0) continue;
+                copies.RemoveAt(index);
+                Free(copy, delay);
+            }
         }
 
         // The trail keeps drawing into its mesh while its weapon exists, so the mesh goes with the weapon's object.
