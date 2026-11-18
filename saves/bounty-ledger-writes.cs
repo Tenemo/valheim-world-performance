@@ -18,7 +18,7 @@ namespace WorldPerformance
         private static readonly object Gate = new object();
         private static readonly Dictionary<string, byte[]> Waiting = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         private static Thread thread;
-        private static bool writing;
+        private static readonly Dictionary<string, DateTime> retryAt = new Dictionary<string, DateTime>(StringComparer.Ordinal);
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -59,7 +59,7 @@ namespace WorldPerformance
                 if (disposing && !handed)
                 {
                     handed = true;
-                    lock (Gate) { Waiting[path] = ToArray(); Monitor.PulseAll(Gate); }
+                    lock (Gate) { Waiting[path] = ToArray(); retryAt.Remove(path); Monitor.PulseAll(Gate); }
                 }
                 base.Dispose(disposing);
             }
@@ -72,12 +72,14 @@ namespace WorldPerformance
                 string path; byte[] bytes;
                 lock (Gate)
                 {
-                    writing = false;
-                    Monitor.PulseAll(Gate);
-                    while (Waiting.Count == 0) Monitor.Wait(Gate);
-                    var next = Waiting.First();
-                    Waiting.Remove(next.Key);
-                    path = next.Key; bytes = next.Value; writing = true;
+                    while (true)
+                    {
+                        while (Waiting.Count == 0) Monitor.Wait(Gate);
+                        var now = DateTime.UtcNow;
+                        var next = Waiting.FirstOrDefault(entry => !retryAt.TryGetValue(entry.Key, out var due) || due <= now);
+                        if (next.Key != null) { path = next.Key; bytes = next.Value; break; }
+                        Monitor.Wait(Gate, TimeSpan.FromSeconds(1));
+                    }
                 }
                 try
                 {
@@ -85,8 +87,22 @@ namespace WorldPerformance
                     File.WriteAllBytes(temporary, bytes);
                     if (File.Exists(path)) File.Replace(temporary, path, null);
                     else File.Move(temporary, path);
+                    lock (Gate)
+                    {
+                        if (ReferenceEquals(Waiting[path], bytes)) Waiting.Remove(path);
+                        retryAt.Remove(path);
+                        Monitor.PulseAll(Gate);
+                    }
                 }
-                catch (Exception error) { Plugin.Log.LogError("Could not save the bounty ledger (" + path + "): " + error.Message); }
+                catch (Exception error)
+                {
+                    lock (Gate)
+                    {
+                        if (!ReferenceEquals(Waiting[path], bytes)) continue;
+                        if (!retryAt.ContainsKey(path)) Plugin.Log.LogError("Retrying bounty ledger save (" + path + "): " + error.Message);
+                        retryAt[path] = DateTime.UtcNow.AddSeconds(1);
+                    }
+                }
             }
         }
 
@@ -94,12 +110,12 @@ namespace WorldPerformance
         {
             var deadline = DateTime.UtcNow.AddMilliseconds(DrainMilliseconds);
             lock (Gate)
-                while (Waiting.Count > 0 || writing)
+                while (Waiting.Count > 0)
                 {
                     int left = (int)(deadline - DateTime.UtcNow).TotalMilliseconds;
                     if (left <= 0 || !Monitor.Wait(Gate, left))
                     {
-                        Plugin.Log.LogError("The bounty ledger was still being written when the game stopped.");
+                        Plugin.Log.LogError("Bounty ledger writes did not finish before shutdown: " + string.Join(", ", Waiting.Keys));
                         return;
                     }
                 }

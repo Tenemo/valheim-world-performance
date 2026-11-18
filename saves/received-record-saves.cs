@@ -14,6 +14,7 @@ namespace WorldPerformance
     internal static class ReceivedRecordSaves
     {
         private static AccessTools.FieldRef<ZDO, Vector3> rotationOf;
+        private static Action<ZDOMan, ZoneSystem.SectorIndex> markChunks;
         private static Values[] tables;
         private static bool persistent, distant;
         private static ZDO.ObjectType type;
@@ -25,6 +26,7 @@ namespace WorldPerformance
         internal static void Initialize(PerformancePatches harmony)
         {
             rotationOf = AccessTools.FieldRefAccess<ZDO, Vector3>("m_rotation");
+            markChunks = AccessTools.MethodDelegate<Action<ZDOMan, ZoneSystem.SectorIndex>>(AccessTools.Method(typeof(ZDOMan), "SetDirtyChunks"));
             tables = new Values[] { new Values<float>("s_floats"), new Values<Vector3>("s_vec3"), new Values<Quaternion>("s_quats"),
                 new Values<int>("s_ints"), new Values<long>("s_longs"), new Values<string>("s_strings"), new Values<byte[]>("s_byteArrays", new SameBytes()) };
             harmony.Patch(AccessTools.Method(typeof(ZDO), nameof(ZDO.InternalSetPosition)), prefix: new HarmonyMethod(typeof(ReceivedRecordSaves), nameof(Moving)));
@@ -45,7 +47,7 @@ namespace WorldPerformance
         // through their revision.
         private static void Moving(ZDO __instance, Vector3 __0)
         {
-            if (Server && __instance.Persistent && !(__instance.GetPosition() == __0) && !__instance.IsOwner()) Mark(__instance);
+            if (Server && __instance.Persistent && !(__instance.GetPosition() == __0) && !__instance.IsOwner()) Mark(__instance, __instance.GetPrefab());
         }
 
         private static void Reading(ZDO __instance, out bool __state)
@@ -70,14 +72,19 @@ namespace WorldPerformance
                 !rotation.Equals(rotationOf(__instance)) || !ReferenceEquals(connection, ZDOExtraData.GetConnection(__instance.m_uid));
             connection = null;
             if (!changed) Unchanged++;
-            else if (__instance.Persistent) Mark(__instance);
+            else
+            {
+                int currentPrefab = __instance.GetPrefab();
+                if (persistent && (!__instance.Persistent || prefab != currentPrefab)) Mark(__instance, prefab);
+                if (__instance.Persistent) Mark(__instance, currentPrefab);
+            }
         }
 
         // Portals are saved apart from the chunks.
-        private static void Mark(ZDO record)
+        private static void Mark(ZDO record, int savedPrefab)
         {
-            if (Game.instance != null && Game.instance.PortalPrefabHash.Contains(record.GetPrefab())) ZDOMan.instance.SetDirtyPortals();
-            else ZDOMan.instance.SetDirtySector(record);
+            if (Game.instance != null && Game.instance.PortalPrefabHash.Contains(savedPrefab)) ZDOMan.instance.SetDirtyPortals();
+            else markChunks(ZDOMan.instance, record.GetSectorIndex());
             Marked++;
         }
 

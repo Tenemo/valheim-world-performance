@@ -32,8 +32,8 @@ namespace WorldPerformance
         // Each known wake postfix's addition to the item data, or null where it adds nothing to a copy without a network record.
         private static readonly Dictionary<MethodInfo, Action<ItemDrop.ItemData>> known = new Dictionary<MethodInfo, Action<ItemDrop.ItemData>>();
         private static readonly List<Action<ItemDrop.ItemData>> wake = new List<Action<ItemDrop.ItemData>>();
-        private static readonly List<MethodInfo> wakeSeen = new List<MethodInfo>();
-        private static bool knownState;
+        private static (Patch[] prefixes, Patch[] postfixes, Patch[] transpilers, Patch[] finalizers, Patch[] manipulators) wakeSeen;
+        private static bool knownState = true;
         // Progression Fix may load after this mod, so its postfixes are known by name: each acts only on a dropped item's network record.
         private static readonly HashSet<string> recordOnly = new HashSet<string> { "EpicLootProgressionFix.CoinIncome.Created", "EpicLootProgressionFix.ItemIceDrag.Postfix", "EpicLootProgressionFix.ItemActivity.Stamp" };
         private static bool Known(MethodInfo method) => known.ContainsKey(method) || recordOnly.Contains(method.DeclaringType.FullName + "." + method.Name);
@@ -83,26 +83,23 @@ namespace WorldPerformance
         private static bool PatchesKnown()
         {
             var info = PatchManager.GetPatchInfo(awake);
-            var postfixes = info?.postfixes;
-            bool same = postfixes != null && postfixes.Length == wakeSeen.Count;
-            for (int index = 0; same && index < postfixes.Length; index++) same = postfixes[index].PatchMethod == wakeSeen[index];
-            if (!same)
+            var current = (info?.prefixes, info?.postfixes, info?.transpilers, info?.finalizers, info?.ilmanipulators);
+            if (!current.Equals(wakeSeen))
             {
-                wakeSeen.Clear();
+                wakeSeen = current;
                 wake.Clear();
-                knownState = info == null || info.prefixes.Length == 0 && info.transpilers.Length == 0 && info.finalizers.Length == 0 && info.postfixes.All(patch => Known(patch.PatchMethod));
+                knownState = info == null || info.prefixes.Length == 0 && info.transpilers.Length == 0 && info.finalizers.Length == 0 && info.ilmanipulators.Length == 0 && info.postfixes.All(patch => Known(patch.PatchMethod));
                 if (info != null)
                 {
-                    wakeSeen.AddRange(info.postfixes.Select(patch => patch.PatchMethod));
                     if (knownState) foreach (var method in PatchProcessor.GetSortedPatchMethods(awake, info.postfixes.ToArray())) if (known.TryGetValue(method, out var addition) && addition != null) wake.Add(addition);
                 }
                 if (!knownState)
-                    Plugin.Fallback("loaded items are instantiated natively: the item wake carries " + string.Join(", ", (info?.prefixes.Concat(info.transpilers).Concat(info.finalizers).Concat(info.postfixes) ?? Enumerable.Empty<Patch>())
+                    Plugin.Fallback("loaded items are instantiated natively: the item wake carries " + string.Join(", ", (info?.prefixes.Concat(info.transpilers).Concat(info.finalizers).Concat(info.ilmanipulators).Concat(info.postfixes) ?? Enumerable.Empty<Patch>())
                         .Where(patch => !Known(patch.PatchMethod)).Select(patch => patch.owner + " " + patch.PatchMethod.DeclaringType.FullName + "." + patch.PatchMethod.Name)));
             }
             if (!knownState || PatchManager.GetPatchInfo(setQuality) != null || PatchManager.GetPatchInfo(ensureValid) != null) return false;
             var saved = PatchManager.GetPatchInfo(savedItem);
-            return saved == null || saved.transpilers.Length == 0;
+            return saved == null || saved.transpilers.Length == 0 && saved.ilmanipulators.Length == 0;
         }
 
         // An inactive object's ItemDrop is never woken, so it holds whatever item data the load hands it and registers nowhere.
