@@ -18,9 +18,10 @@ namespace WorldPerformance
     // last awake step, since it has not moved. Players, swimmers and fliers stay native.
     // An owned creature that has done nothing for half a second, whose body sleeps and whose tilt has settled, runs its fixed
     // update only every fourth step with the skipped steps' time added; at Tenemo's base that is most of his tames, and each
-    // update cost about 20 µs. Anything it does or undergoes runs it again at once: a decision to move, a push, a hit or a
-    // heal, a status effect, an attack, water, a rider, a woken body. Its settled tilt is not rewritten each update either,
-    // since that write moves a lox's body capsules, which sit under its visual, and so woke its body for a physics step.
+    // update cost about 20 µs. Anything it does or undergoes runs it again at once, for one step's time: a decision to move
+    // or turn, a push, a hit or a heal, a status effect, an attack, water, a rider; a woken body runs it every step. Its settled tilt is not rewritten each
+    // update either, since that write moves a lox's body capsules, which sit under its visual, and so woke its body for a
+    // physics step.
     internal static class RestingCreatures
     {
         private delegate bool GroundQuery(Character character, Vector3 point, out float height, out Vector3 normal);
@@ -75,8 +76,8 @@ namespace WorldPerformance
         // body sleeps and its tilt is settled, with the skipped steps' time added; anything it does runs it at once.
         internal static int SpacedSteps = 4, SettleSteps = 25;
         // Off keeps a creature with no speed busy while its AI holds a wander direction, as before; the isolated client switches
-        // it for paired measurements. The game turns a creature only while it is more than FacingDegrees off its direction, and
-        // a turn speed under StillTurnSpeed no longer shows in its animation.
+        // it for paired measurements. The game turns a creature only while it is more than FacingDegrees off its look direction,
+        // and a turn speed under StillTurnSpeed no longer shows in its animation.
         internal static bool RootedIdle = true;
         private const float FacingDegrees = 0.001f, StillTurnSpeed = 0.01f;
         // The squared change of the visual's rotation a step below which its tilt counts as settled: about a hundredth of a degree.
@@ -84,6 +85,8 @@ namespace WorldPerformance
         internal static long Skipped, Wakes, Settled, RaysKept, RaysCast, DataKept, DataRead, SpacedSkips, SpacedRuns, Stirred, TiltsHeld;
         private static readonly AccessTools.FieldRef<Character, Vector3> moveDirs = AccessTools.FieldRefAccess<Character, Vector3>("m_moveDir");
         private static readonly AccessTools.FieldRef<Character, float> currentTurns = AccessTools.FieldRefAccess<Character, float>("m_currentTurnVel");
+        private static readonly AccessTools.FieldRef<Character, Quaternion> lookYaws = AccessTools.FieldRefAccess<Character, Quaternion>("m_lookYaw");
+        private static readonly AccessTools.FieldRef<Character, bool> groundContacts = AccessTools.FieldRefAccess<Character, bool>("m_groundContact");
         private static readonly AccessTools.FieldRef<Character, Vector3> pushForces = AccessTools.FieldRefAccess<Character, Vector3>("m_pushForce");
         private static readonly AccessTools.FieldRef<Character, Vector3> currentVelocities = AccessTools.FieldRefAccess<Character, Vector3>("m_currentVel");
         private static readonly AccessTools.FieldRef<Character, float> standUps = AccessTools.FieldRefAccess<Character, float>("m_standUp");
@@ -116,7 +119,7 @@ namespace WorldPerformance
                 // A changed game method leaves creatures awake.
                 Failure = (error.InnerException ?? error).Message;
                 Running = false;
-                patches.UnpatchSelf();
+                patches.UnpatchOwner();
                 Plugin.Fallback("Resting creatures stay awake: " + Failure);
             }
         }
@@ -125,7 +128,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             stepKnown = false;
         }
 
@@ -169,8 +172,12 @@ namespace WorldPerformance
                 if (!owner.IsValid() || !owner.IsOwner()) return true;
             }
             if (creature.IsPlayer() || moveDirs(creature) != Vector3.zero && !Rooted(creature) || pushForces(creature) != Vector3.zero || standUps(creature) > 0f || liquidDepths(creature) > 0f) return true;
-            if (currentVelocities(creature).sqrMagnitude >= StillSquared || bodies(creature).linearVelocity.sqrMagnitude >= StillSquared) return true;
-            if (attacks(creature) != null || effects(effectManagers(creature)).Count > 0 || creature.IsAttached()) return true;
+            if (currentVelocities(creature).sqrMagnitude >= StillSquared || bodies(creature).linearVelocity.sqrMagnitude >= StillSquared || Turning(creature)) return true;
+            if (effects(effectManagers(creature)).Count > 0 || creature.IsAttached()) return true;
+            // The last attack stays the current one after it ends; it runs until it is done, and the animation's attack state
+            // still counts in the time since the last attack.
+            var attack = attacks(creature);
+            if (attack != null && !attack.IsDone() || creature.InAttack()) return true;
             var mind = minds(creature);
             if (!mind || mind.HaveRider()) return true;
             // Its view was found valid and owned above, and nothing since changed that.
@@ -180,22 +187,36 @@ namespace WorldPerformance
         }
 
         // A creature with no walking, running or swimming speed, such as a tentaroot, keeps the direction its AI last chose to
-        // wander in, which it can never walk; while it already faces that way and its turn has died away, its fixed update
-        // neither moves nor turns it, so the direction alone does not keep it busy. A new direction it does not face runs it
-        // again at once.
-        private static bool Rooted(Character creature)
+        // wander in, which it can never walk, so the direction alone does not keep it busy; whether it still turns is tested
+        // for every creature.
+        private static bool Rooted(Character creature) =>
+            RootedIdle && creature.m_speed <= 0f && creature.m_walkSpeed <= 0f && creature.m_runSpeed <= 0f && creature.m_swimSpeed <= 0f && !creature.m_flying;
+
+        // Every step the game turns a creature that is not a player toward its look direction, whether it moves or not, and
+        // eases its turn speed toward that turn; an AI that stops to look somewhere sets only the look direction. While the
+        // creature is more than the game's own FacingDegrees off it, or its turn speed still shows, it is turning. A sleeping
+        // creature on land neither turns nor changes its turn speed.
+        private static bool Turning(Character creature)
         {
-            if (!RootedIdle || creature.m_speed > 0f || creature.m_walkSpeed > 0f || creature.m_runSpeed > 0f || creature.m_swimSpeed > 0f || creature.m_flying) return false;
-            if (Mathf.Abs(currentTurns(creature)) >= StillTurnSpeed) return false;
-            return Mathf.Abs(Utils.GetYawDeltaAngle(creature.transform.rotation, Quaternion.LookRotation(moveDirs(creature)))) <= FacingDegrees;
+            var mind = minds(creature);
+            if (mind && mind.IsSleeping() && !creature.m_flying) return false;
+            return Mathf.Abs(currentTurns(creature)) >= StillTurnSpeed || Mathf.Abs(Utils.GetYawDeltaAngle(creature.transform.rotation, lookYaws(creature))) > FacingDegrees;
         }
 
+        // A spaced update makes up the skipped steps' time. A creature that has just done or undergone something runs a single
+        // step's time instead: a push, a status effect, stagger, noise or a turn begun since its last update is as old as one
+        // step natively, and the skipped steps' time added would wear them down by up to three steps more, so a push carried
+        // the creature up to 1.2 m less. The time is left out instead of added later, when that state could still be there;
+        // the timers it would have run on, such as the smoke and fall-through checks and the time since the last attack, only
+        // tick that much later, as they do between spaced updates.
         private static bool SpaceSteps(Humanoid __instance, ref float fixedDeltaTime)
         {
             if (!Sleeping || !Spacing) return true;
             var ground = Find(__instance);
             if (Busy(__instance)) ground.restSteps = 0;
             else ground.restSteps++;
+            // Time is owed only after steps were skipped, so a count back within SettleSteps means that it was stirred or busy.
+            if (ground.restSteps <= SettleSteps) ground.owed = 0f;
             if (ground.restSteps <= SettleSteps || (HoldingTilt && !ground.tiltStill) || ground.restSteps % SpacedSteps == 0 || !bodies(__instance).IsSleeping() || WakeStep(__instance))
             {
                 fixedDeltaTime += ground.owed;
@@ -262,10 +283,12 @@ namespace WorldPerformance
         }
 
         // After the physics step no force can be waiting, so a body it left still can sleep without losing one. A new velocity or
-        // force in the next step wakes it again.
+        // force in the next step wakes it again. Only a body standing on something sleeps, by the game's own test of a contact
+        // as ground: one touching only a wall or a ceiling at the top of a jump would hang there, as a sleeping body counts as
+        // on the ground.
         private static void Touched(Character __instance)
         {
-            if (!Sleeping || !Settling || __instance.IsPlayer() || !__instance.IsOwner()) return;
+            if (!Sleeping || !Settling || __instance.IsPlayer() || !__instance.IsOwner() || !groundContacts(__instance)) return;
             var body = bodies(__instance);
             if (body.IsSleeping() || body.linearVelocity.sqrMagnitude >= StillSquared) return;
             Settled++;

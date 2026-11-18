@@ -58,7 +58,8 @@ namespace WorldPerformance
             return false;
         }
 
-        // A watcher polled twice begins a new pass.
+        // A watcher polled twice begins a new pass, and so does each watcher's first look at its folder when it starts, which
+        // must see the files as they are then.
         [HarmonyPatch]
         private static class Polling
         {
@@ -66,10 +67,10 @@ namespace WorldPerformance
 
             private static MethodBase TargetMethod() => AccessTools.DeclaredMethod(watcher, "UpdateDataAndDispatch");
 
-            private static void Prefix(object data)
+            private static void Prefix(object data, bool dispatch)
             {
                 var current = Current();
-                if (current != null && !current.Seen.Add(data)) { current.Clear(); current.Seen.Add(data); }
+                if (current != null && (!dispatch || !current.Seen.Add(data))) { current.Clear(); current.Seen.Add(data); }
             }
         }
 

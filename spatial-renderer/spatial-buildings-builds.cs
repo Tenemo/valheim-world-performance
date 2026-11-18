@@ -227,10 +227,12 @@ namespace WorldPerformance
 
         // Takes over a member whose merged parts are all live: it draws merged at once at the levels the camera selects. One
         // with a crossfading group keeps showing natively while the camera is near one of its detail-level changes, and waits
-        // one fade first, since the camera may have passed a change just before.
+        // one fade first, since the camera may have passed a change just before. One that moved or was scaled since it was
+        // planned is planned again instead.
         private static void Own(Member member, Vector3 camera)
         {
             if (member.Owned || member.Removed || member.Dirty || member.Merged.Count == 0 || member.Slots.Count != member.Merged.Count) return;
+            if (Moved(member)) { HandBack(member, "moved"); return; }
             member.Owned = true;
             float closest = Levels(member, camera, out _);
             if (Crossfades(member)) Faded(member);
@@ -353,6 +355,9 @@ namespace WorldPerformance
             foreach (var part in member.Parts)
                 if (part.Detail >= 0 && (member.Signature & 1UL << part.Renderer) != 0 && !member.Active.Contains(member.Details[part.Detail]))
                     member.Active.Add(member.Details[part.Detail]);
+            // Its groups' places and sizes are read with its renderers' matrices, since ground physics moves and mods scale
+            // natural objects without the game's own scale change.
+            foreach (var detail in member.Details) Place(detail);
             var cell = member.Cell;
             int previous = -1;
             BatchKey style = default;
@@ -469,9 +474,9 @@ namespace WorldPerformance
             // With the compaction kernel the whole mesh is followed by a drawn region, which starts at an even index and holds an
             // even count, since the kernel reads and writes a 16-bit mesh's indices in pairs. Shadowed lights' copies of their
             // slots follow it, in what the drawn slots leave of the region and as much again: inside a base nearly every slot
-            // draws, and with a quarter more most lights there had no room.
+            // draws, and with a quarter more most lights there had no room. Without the kernel the buffer holds the whole mesh alone.
             int drawnFirst = compactIndices ? (indexCount + 1) & ~1 : 0, capacity = compactIndices ? (DrawnCapacity(slots, indexCounts) + 1) & ~1 : 0;
-            int total = drawnFirst + 2 * capacity;
+            int total = compactIndices ? drawnFirst + 2 * capacity : indexCount;
             data.SetIndexBufferParams(total, shortIndices ? IndexFormat.UInt16 : IndexFormat.UInt32);
             // The renderer draws the first submesh, the slots drawing now, empty until the first compaction; the sky depth render
             // draws the second, the whole mesh, since its slots follow that camera's own detail levels. Shadowed lights draw the

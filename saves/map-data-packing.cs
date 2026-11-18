@@ -74,7 +74,7 @@ namespace WorldPerformance
             if (!Running) return;
             FinishWaiting();
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         private static void TimerAsking() => timerSave = true;

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.Animations;
 
 namespace WorldPerformance
 {
@@ -55,7 +56,7 @@ namespace WorldPerformance
             if (!running) return;
             running = false;
             Paused = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             foreach (var effect in managed.ToArray())
             {
                 try { Restore(effect); }
@@ -74,7 +75,8 @@ namespace WorldPerformance
             foreach (var effect in managed)
                 if (!effect || !effect.System) continue;
                 else if (!paused) Restore(effect);
-                else
+                // One attached since it started is let go as it forms.
+                else if (Carrier(effect.System) == null)
                 {
                     var main = effect.System.main;
                     main.cullingMode = ParticleSystemCullingMode.Pause;
@@ -98,8 +100,9 @@ namespace WorldPerformance
 
         // Why a system keeps native simulation, or null when it may pause while unseen. Particle lights light what the camera
         // sees; collision, trigger and sub-emitter modules reach scripts or other systems; characters, projectiles, items and
-        // vehicles carry their effects around; scripts that write particles every frame or own environment effects need them
-        // simulated; a stop action would wait for particles that never age while unseen.
+        // vehicles carry their effects around, and an object whose transform the network synchronises moves; scripts that write
+        // particles every frame or own environment effects need them simulated; a stop action would wait for particles that
+        // never age while unseen.
         internal static string Exclusion(ParticleSystem system, HashSet<ParticleSystem> subEmitters)
         {
             var main = system.main;
@@ -107,10 +110,8 @@ namespace WorldPerformance
             if (!main.loop) return "one-shot";
             if (main.stopAction != ParticleSystemStopAction.None) return "stop action";
             if (!system.GetComponentInParent<ZNetView>(true)) return "not a world object";
-            if (system.GetComponentInParent<Character>(true)) return "character";
-            if (system.GetComponentInParent<Projectile>(true)) return "projectile";
-            if (system.GetComponentInParent<ItemDrop>(true)) return "item";
-            if (system.GetComponentInParent<Ship>(true) || system.GetComponentInParent<Vagon>(true)) return "vehicle";
+            if (Carrier(system) is string carrier) return carrier;
+            if (system.GetComponentInParent<ZSyncTransform>(true)) return "moving";
             if (system.lights.enabled) return "lights module";
             if (system.collision.enabled || system.trigger.enabled) return "collision or trigger module";
             if (system.subEmitters.enabled && system.subEmitters.subEmittersCount > 0 || subEmitters.Contains(system)) return "sub-emitters";
@@ -120,6 +121,27 @@ namespace WorldPerformance
                 system.GetComponent<OceanBubbleParticles>() || system.GetComponent<MistEmitter>() || system.GetComponent<DistantFogEmitter>() ||
                 system.GetComponent<ParticleMist>()) return "script-driven";
             return null;
+        }
+
+        // What carries a system around, or null: a character, projectile, item or vehicle it sits under, or a constraint that
+        // makes it follow one, as EffectList gives effects that follow. EffectList creates an effect free-standing and attaches
+        // it after its view woke, as with a status effect's lasting visual on a character, so an effect is looked at again as
+        // it starts and as it forms.
+        private static string Carrier(ParticleSystem system) =>
+            system.GetComponentInParent<Character>(true) ? "character" :
+            system.GetComponentInParent<Projectile>(true) ? "projectile" :
+            system.GetComponentInParent<ItemDrop>(true) ? "item" :
+            system.GetComponentInParent<Ship>(true) || system.GetComponentInParent<Vagon>(true) ? "vehicle" :
+            system.GetComponentInParent<ParentConstraint>(true) ? "follows" : null;
+
+        // An effect attached since it was judged keeps its native settings and is no longer managed.
+        private static bool Carried(UnseenEffect effect)
+        {
+            if (Carrier(effect.System) == null) return false;
+            Restore(effect);
+            managed.Remove(effect);
+            UnityEngine.Object.Destroy(effect);
+            return true;
         }
 
         private static HashSet<ParticleSystem> SubEmitters(List<ParticleSystem> candidates)
@@ -239,11 +261,12 @@ namespace WorldPerformance
             if (!effect.System) return;
             // A copy of a managed object made after the feature stopped keeps its native settings.
             if (!running) { Restore(effect); UnityEngine.Object.Destroy(effect); return; }
-            managed.Add(effect);
-            if (!Paused) return;
             long start = Stopwatch.GetTimestamp();
             try
             {
+                if (Carried(effect)) return;
+                managed.Add(effect);
+                if (!Paused) return;
                 var main = effect.System.main;
                 main.cullingMode = effect.NativeCulling;
                 effect.Form();
@@ -258,6 +281,7 @@ namespace WorldPerformance
             if (!running || !Paused || !effect.System) return;
             try
             {
+                if (Carried(effect)) return;
                 var main = effect.System.main;
                 main.cullingMode = ParticleSystemCullingMode.Pause;
             }

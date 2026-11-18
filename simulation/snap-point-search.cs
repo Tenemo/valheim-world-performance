@@ -47,7 +47,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             colliderPieces.Clear();
             piecePoints.Clear();
         }

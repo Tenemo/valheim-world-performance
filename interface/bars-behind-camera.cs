@@ -41,7 +41,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // The update shows a bar with gui.SetActive(true) twice, first for every bar that should have one and then for each
@@ -90,7 +90,8 @@ namespace WorldPerformance
             catch (Exception error)
             {
                 Failure = error.ToString();
-                Plugin.Log?.LogError("Leaving bars behind the camera hidden failed and stopped; the enemy hud shows and hides them natively. " + error);
+                Plugin.Log?.LogError(error);
+                Plugin.Fallback("Leaving bars behind the camera hidden failed and stopped; the enemy hud shows and hides them natively: " + error.GetBaseException().Message);
                 return false;
             }
         }

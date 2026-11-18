@@ -65,7 +65,7 @@ namespace WorldPerformance
         {
             if (!running) return;
             running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             foreach (var entry in entries) Restore(entry);
             entries.Clear();
             prefabs.Clear();

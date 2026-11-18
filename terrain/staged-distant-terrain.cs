@@ -62,7 +62,7 @@ namespace WorldPerformance
             {
                 Failure = error.Message;
                 Running = false;
-                patches.UnpatchSelf();
+                patches.UnpatchOwner();
                 Plugin.Log.LogWarning("Distant terrain rebuilds stay native: " + error.Message);
             }
         }
@@ -71,7 +71,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             foreach (var staging in stagings.Values) Discard(staging);
             stagings.Clear();
         }

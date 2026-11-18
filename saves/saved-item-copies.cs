@@ -129,7 +129,13 @@ namespace WorldPerformance
             if (prefab.activeSelf)
             {
                 data.m_dropPrefab = ObjectDB.instance.GetItemPrefab(Utils.GetPrefabName(prefab.name + "(Clone)"));
-                foreach (var addition in wake) addition(data);
+                // A failing wake postfix is logged and the load goes on, as Unity does for the copy's wake; the postfixes after
+                // it are skipped, as they are in the native wake.
+                foreach (var addition in wake)
+                {
+                    try { addition(data); }
+                    catch (Exception error) { Debug.LogException(error); break; }
+                }
             }
             // The rest of the game's load, without the copy's object.
             data.m_stack = Mathf.Min(stack, data.m_shared.m_maxStackSize);
@@ -342,7 +348,8 @@ namespace WorldPerformance
             if (ReferenceEquals(value, null)) return null;
             if (!value) { refused = true; return value; }
             var transform = value is GameObject gameObject ? gameObject.transform : value is Component component ? component.transform : null;
-            if (transform != null && root != null && transform.root == root) refused = true;
+            // A prefab may sit under another object, as Jotunn keeps the items it registers.
+            if (transform != null && root != null && transform.IsChildOf(root)) refused = true;
             return value;
         }
     }

@@ -266,10 +266,13 @@ namespace WorldPerformance
             batch.SkyTo = SlotLimit - 1;
         }
 
+        // A member's native renderers are hidden at most once, with their own settings, and shown again only while hidden: the
+        // measurement switches show and hide them in place as well.
         private static void HideNative(Member member)
         {
             // A crop shows natively while its merged meshes are switched off, also when it arrives meanwhile.
-            if (CropsNative && member.Crop) return;
+            if (member.NativeHidden || CropsNative && member.Crop) return;
+            member.NativeHidden = true;
             for (int index = 0; index < member.Renderers.Length; index++)
             {
                 var renderer = member.Renderers[index];
@@ -283,6 +286,8 @@ namespace WorldPerformance
 
         private static void ShowNative(Member member)
         {
+            if (!member.NativeHidden) return;
+            member.NativeHidden = false;
             foreach (var detail in member.Details)
                 if (detail.Owned && !detail.Fades && detail.Group) detail.Group.enabled = detail.NativeEnabled;
             for (int index = 0; index < member.Renderers.Length; index++)

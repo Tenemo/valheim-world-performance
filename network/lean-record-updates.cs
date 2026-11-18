@@ -40,7 +40,10 @@ namespace WorldPerformance
             Running = true;
             Failure = null;
             mainThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
-            Patch(AccessTools.Method(typeof(ZDO), nameof(ZDO.Serialize)), transpiler: nameof(LeanSerialize));
+            // The value tables are found now, not at the first record sent, so a renamed table leaves records written natively.
+            string tables = TablesFound();
+            if (tables != null) Fail("records are written natively, since " + tables, true);
+            else Patch(AccessTools.Method(typeof(ZDO), nameof(ZDO.Serialize)), transpiler: nameof(LeanSerialize));
             Patch(AccessTools.Method(typeof(ZDO), nameof(ZDO.Deserialize)), transpiler: nameof(LeanDeserialize));
             Patch(AccessTools.Method(typeof(ZPackage), nameof(ZPackage.Write), new[] { typeof(ZPackage) }), prefix: nameof(WriteFromStream));
             var passes = new MethodBase[] { AccessTools.Method(typeof(ZRpc), nameof(ZRpc.Invoke), new[] { typeof(string), typeof(object[]) }),
@@ -50,13 +53,14 @@ namespace WorldPerformance
                 AccessTools.Method(typeof(ZDOMan), "SendZDOs") };
             var foreign = passes.Where(method => method == null || Patched(method)).Select(method => method == null ? "a missing method" : method.DeclaringType.Name + "." + method.Name).ToList();
             keepPackages = foreign.Count == 0;
-            if (!keepPackages) Fail("batches use new packages, since other mods patch " + string.Join(", ", foreign));
+            if (!keepPackages) Fail("batches use new packages, since other mods patch " + string.Join(", ", foreign), false);
             else Patch(AccessTools.Method(typeof(ZDOMan), "SendZDOs"), transpiler: nameof(KeepBatchPackages));
         }
 
         // An error leaves that method native and takes this mod's patch off it, so that other mods can still patch it.
         private static void Patch(MethodBase method, string prefix = null, string transpiler = null)
         {
+            if (method == null) { Fail("a patched game method is missing, so its part stays native", true); return; }
             try
             {
                 patches.Patch(method, prefix: prefix == null ? null : new HarmonyMethod(typeof(LeanRecordUpdates), prefix),
@@ -64,9 +68,9 @@ namespace WorldPerformance
             }
             catch (Exception error)
             {
-                Fail($"{method.DeclaringType.Name}.{method.Name} stays native after an error: {error}");
+                Fail($"{method.DeclaringType.Name}.{method.Name} stays native after an error: {error}", true);
                 try { patches.Unpatch(method, HarmonyPatchType.All, patches.Id); }
-                catch (Exception unpatching) { Fail($"removing the patch from {method.DeclaringType.Name}.{method.Name} failed: {unpatching}"); }
+                catch (Exception unpatching) { Fail($"removing the patch from {method.DeclaringType.Name}.{method.Name} failed: {unpatching}", true); }
             }
         }
 
@@ -74,7 +78,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             batch = record = null;
         }
 
@@ -86,10 +90,19 @@ namespace WorldPerformance
                 .Any(patch => patch.owner != patches.Id && !patch.owner.StartsWith(Plugin.Id, StringComparison.Ordinal));
         }
 
-        private static void Fail(string reason)
+        // A part that stays native because the game changed is reported as a fallback; another mod's patch on the batch send is
+        // expected beside Better Networking and Network Performance System, so that one is only noted.
+        private static void Fail(string reason, bool fallback)
         {
             Failure = Failure == null ? reason : Failure + "; " + reason;
-            Plugin.Log.LogWarning("Network records: " + reason + ".");
+            if (fallback) Plugin.Fallback("Network records: " + reason);
+            else Plugin.Log.LogWarning("Network records: " + reason + ".");
+        }
+
+        private static string TablesFound()
+        {
+            try { return Table<float>.Found && Table<Vector3>.Found && Table<Quaternion>.Found && Table<int>.Found && Table<long>.Found && Table<string>.Found && Table<byte[]>.Found ? null : "a value table is missing"; }
+            catch (Exception error) { return "the value tables changed: " + error.GetBaseException().Message; }
         }
 
         // The serializer gets the record's values in kept lists and writes each table with a writer of its own type instead of a
@@ -112,7 +125,7 @@ namespace WorldPerformance
                 written++;
             }
             if (found == 1 && written == 7) return code;
-            Fail("ZDO.Serialize no longer has the expected shape, so records are written natively");
+            Fail("ZDO.Serialize no longer has the expected shape, so records are written natively", true);
             return native;
         }
 
@@ -135,7 +148,7 @@ namespace WorldPerformance
                 read++;
             }
             if (read == 7) return code;
-            Fail("ZDO.Deserialize no longer has the expected shape, so records are read natively");
+            Fail("ZDO.Deserialize no longer has the expected shape, so records are read natively", true);
             return native;
         }
 
@@ -148,7 +161,7 @@ namespace WorldPerformance
             var sites = code.Where(instruction => instruction.opcode == OpCodes.Newobj && Equals(instruction.operand, created)).ToList();
             if (sites.Count != 2)
             {
-                Fail("ZDOMan.SendZDOs no longer has the expected shape, so batches use new packages");
+                Fail("ZDOMan.SendZDOs no longer has the expected shape, so batches use new packages", true);
                 return native;
             }
             sites[0].opcode = sites[1].opcode = OpCodes.Call;
@@ -229,6 +242,7 @@ namespace WorldPerformance
             private static readonly AccessTools.FieldRef<BinarySearchDictionary<int, T>, T[]> valuesOf = AccessTools.FieldRefAccess<BinarySearchDictionary<int, T>, T[]>("m_values");
             private static readonly AccessTools.FieldRef<BinarySearchDictionary<int, T>, ushort> lengthOf = AccessTools.FieldRefAccess<BinarySearchDictionary<int, T>, ushort>("m_length");
             private static readonly List<KeyValuePair<int, T>> kept = new List<KeyValuePair<int, T>>();
+            internal static bool Found => table != null;
 
             private static string Name() =>
                 typeof(T) == typeof(float) ? "s_floats" : typeof(T) == typeof(Vector3) ? "s_vec3" : typeof(T) == typeof(Quaternion) ? "s_quats" : typeof(T) == typeof(int) ? "s_ints"

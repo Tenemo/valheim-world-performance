@@ -59,11 +59,21 @@ namespace WorldPerformance
         internal static void Start()
         {
             if (Running) return;
-            patches.Patch(AccessTools.Method(typeof(Sign), "Awake") ?? throw new MissingMethodException("Sign.Awake changed."),
-                postfix: new HarmonyMethod(typeof(DistantSignWriting), nameof(Register)));
-            // Every camera change, including other mods' patches of the camera update, happens inside this method.
-            patches.Patch(AccessTools.Method(typeof(GameCamera), "LateUpdate") ?? throw new MissingMethodException("GameCamera.LateUpdate changed."),
-                postfix: new HarmonyMethod(typeof(DistantSignWriting), nameof(Apply)));
+            // A start that fails takes off what it patched, so signs are not collected with nothing to show them again.
+            try
+            {
+                patches.Patch(AccessTools.Method(typeof(Sign), "Awake") ?? throw new MissingMethodException("Sign.Awake changed."),
+                    postfix: new HarmonyMethod(typeof(DistantSignWriting), nameof(Register)));
+                // Every camera change, including other mods' patches of the camera update, happens inside this method.
+                patches.Patch(AccessTools.Method(typeof(GameCamera), "LateUpdate") ?? throw new MissingMethodException("GameCamera.LateUpdate changed."),
+                    postfix: new HarmonyMethod(typeof(DistantSignWriting), nameof(Apply)));
+            }
+            catch
+            {
+                patches.UnpatchOwner();
+                writings.Clear();
+                throw;
+            }
             Running = true;
         }
 
@@ -71,7 +81,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             ShowAll();
             writings.Clear();
         }

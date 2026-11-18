@@ -64,7 +64,7 @@ namespace WorldPerformance
 
         internal static void Stop()
         {
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             Array.Clear(tiles, 0, tiles.Length);
             Running = false;
         }

@@ -26,7 +26,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         private static bool UpdateHintObject(GameObject go, bool condition, Localize ___m_localize)

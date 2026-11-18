@@ -39,7 +39,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // Only the two per-frame readers change; other readers, such as the graphics settings menu, ask Windows as before.

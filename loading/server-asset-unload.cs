@@ -18,6 +18,7 @@ namespace WorldPerformance
         internal static long Held, Unloaded;
         private static bool owed, running;
         private static DateTime owedSince, emptySince;
+        private static readonly AccessTools.FieldRef<Game, DateTime> lastUnload = AccessTools.FieldRefAccess<Game, DateTime>("m_lastCollectResources");
 
         internal static void Initialize(PerformancePatches harmony)
         {
@@ -28,9 +29,11 @@ namespace WorldPerformance
 
         private static int Players => ZNet.instance == null ? 0 : ZNet.instance.GetPeers().Count;
 
-        private static bool Check()
+        // Only an unload the game would make now is held; one an earlier unload made unnecessary is skipped as natively.
+        private static bool Check(Game __instance)
         {
             if (!Holding || owed && DateTime.Now - owedSince >= Longest || Players == 0) { owed = false; return true; }
+            if (!owed && !(DateTime.Now - TimeSpan.FromSeconds(3599.0) > lastUnload(__instance))) return true;
             if (!owed)
             {
                 owed = true;

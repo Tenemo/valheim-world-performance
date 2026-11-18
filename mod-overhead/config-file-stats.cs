@@ -13,7 +13,7 @@ namespace WorldPerformance
     // main thread. While Windows takes a snapshot of the disk such a check waits, and the server froze for up to 4.7 s. A
     // background thread now checks the watched files twice a second and the periodic check reads its latest answers; the
     // mods' own checks after a reload or after writing a file still read the disk, and their answers win over older ones.
-    // An edit to a config file is noticed up to half a second later.
+    // An edit to a config file is noticed up to half a second later, and a check that finds no new reading waits for the next.
     internal static class ConfigFileStats
     {
         private const int IntervalMilliseconds = 500;
@@ -25,6 +25,8 @@ namespace WorldPerformance
         {
             internal DateTime Written;
             internal long Length, Started;
+            // The periodic check has had this reading.
+            internal bool Returned;
         }
 
         internal static void Initialize(PerformancePatches harmony)
@@ -67,12 +69,21 @@ namespace WorldPerformance
             catch { return (default(DateTime), -1L); }
         }
 
+        // A changed file is reloaded once two checks half a second apart agree, so each check gets a reading the last one did
+        // not have. Without one yet, as while the disk is held, the file counts as unreadable, which only postpones its reload.
         private static ValueTuple<DateTime, long> Latest(string path)
         {
-            lock (Gate) if (Readings.TryGetValue(path, out var known)) return (known.Written, known.Length);
+            lock (Gate)
+                if (Readings.TryGetValue(path, out var known))
+                {
+                    if (known.Returned) return (default(DateTime), -1L);
+                    known.Returned = true;
+                    return (known.Written, known.Length);
+                }
             long started = Stopwatch.GetTimestamp();
             var answer = Read(path);
             Store(path, answer, started);
+            lock (Gate) if (Readings.TryGetValue(path, out var stored) && stored.Started == started) stored.Returned = true;
             return answer;
         }
 

@@ -109,7 +109,7 @@ namespace WorldPerformance
             }
             catch
             {
-                patches.UnpatchSelf();
+                patches.UnpatchOwner();
                 settings.SettingChanged -= SettingChanged;
                 throw;
             }
@@ -121,7 +121,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             settings.SettingChanged -= SettingChanged;
             drawnSnapshot = chipSnapshot = null;
         }

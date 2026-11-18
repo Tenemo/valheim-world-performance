@@ -43,6 +43,15 @@ namespace WorldPerformance
                 postfix: new HarmonyMethod(typeof(SendWindow), nameof(ShareUpload)));
             harmony.Patch(AccessTools.Method(typeof(ZDOMan), nameof(ZDOMan.AddPeer)), postfix: new HarmonyMethod(typeof(SendWindow), nameof(ShareUpload)));
             harmony.Patch(AccessTools.Method(typeof(ZDOMan), nameof(ZDOMan.RemovePeer)), postfix: new HarmonyMethod(typeof(SendWindow), nameof(ShareUpload)));
+            // Better Networking writes its own send rate whenever a socket opens or its settings change; the share is written
+            // again after it, so the server's settings keep deciding the rate.
+            var betterRate = AccessTools.TypeByName("DIT.BetterNetworking10.SteamSendRatePatch");
+            if (betterRate != null)
+            {
+                var refresh = AccessTools.Method(betterRate, "Refresh", Type.EmptyTypes);
+                if (refresh == null) throw new InvalidOperationException("Better Networking's send rate refresh changed.");
+                harmony.Patch(refresh, postfix: new HarmonyMethod(typeof(SendWindow), nameof(ShareUpload)));
+            }
         }
 
         // Network Performance System's window replaces the same two limits, so this runs first and leaves it none, also when
@@ -85,7 +94,8 @@ namespace WorldPerformance
             var peers = PeerConnections.UpdatePeers();
             int players = Math.Max(1, peers == null ? 0 : peers.Count);
             int share = Math.Min(Plugin.ServerSendRate.Value * 1024, Plugin.UploadBudget.Value * 1024 / players);
-            if (share == sharedRate) return;
+            // Written even when the share is unchanged: a new connection or another mod may have set its own rate since.
+            bool changed = share != sharedRate;
             bool applied = SetRate(ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Global, IntPtr.Zero, share);
             if (peers != null)
                 foreach (var updatePeer in peers)
@@ -96,7 +106,7 @@ namespace WorldPerformance
                         new IntPtr((long)PeerConnections.Connection(socket).m_HSteamNetConnection), share);
                 }
             if (!applied) logger.LogError("Steam refused the server send rate; players keep the rate their connections already had.");
-            else
+            else if (changed)
             {
                 sharedRate = share;
                 logger.LogInfo($"Object updates are sent to each of {players} player(s) at {share / 1024.0:F2} KiB/s.");

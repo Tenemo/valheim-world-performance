@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.8
+
+- A teleport, portal trip or respawn ends once your destination's buildings and terrain have arrived and been created, also at a busy base where another player keeps fires burning, where it used to wait the full 8 seconds, and at a high frame rate it no longer ends while the area is still being created.
+- An item taken off an item stand, or food off a cooking station, at a large base disappears at once instead of staying drawn, and a tree that Star Level System resizes is drawn at its new size.
+- Water keeps its usual draw distance, the pieces of something that breaks keep their look until they're gone, and far torch flames keep their size.
+- A resting animal that is pushed moves as far as it should, and one that has attacked rests again.
+- Turning FedoHud's beehive or crop icons on in game gives the hives and crops already loaded their icons at once.
+- Something that stopped being saved with the world no longer comes back after a server restart.
+- A bounty ledger save that fails, as while another program holds the file, is retried until it is written, and stopping, logging out or quitting waits for it at most 15 seconds.
+- A config file being written while Epic Loot or Equipment and Quick Slots checks it is no longer read half-written.
+
 ## 1.0.7
 
 - An object removed by another mod, or together with something it was attached to, no longer stops the world around you from unloading for the rest of the session; before, everything you passed stayed loaded and frames grew up to three times longer.

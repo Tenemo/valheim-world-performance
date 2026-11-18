@@ -90,10 +90,11 @@ namespace WorldPerformance
         // The server sends its peer information once it has accepted the player.
         private static void Accepted(ZNet __instance)
         {
+            // Any accepted join ends the skipped one: a later failure, such as a host's game closing, is not its failure.
+            unconfirmed = null;
             if (__instance.IsServer() || ZNet.m_onlineBackend != OnlineBackendType.Steamworks) return;
             string host = (string)serverHost.GetValue(null);
             if (string.IsNullOrEmpty(host)) return;
-            unconfirmed = null;
             string address = Address(host, (int)serverHostPort.GetValue(null));
             var list = Known();
             if (list.Count > 0 && list[0] == address) return;
@@ -108,7 +109,13 @@ namespace WorldPerformance
         {
             if (unconfirmed == null) return;
             var status = statusOverride != ZNet.ConnectionStatus.None ? statusOverride : ZNet.GetConnectionStatus();
-            if (status == ZNet.ConnectionStatus.None || status == ZNet.ConnectionStatus.Connecting || status == ZNet.ConnectionStatus.Connected) return;
+            // The menu also shows the result of a join cancelled before the server answered, such as at its password prompt:
+            // that is no failure of the address, and the join it skipped is over.
+            if (status == ZNet.ConnectionStatus.None || status == ZNet.ConnectionStatus.Connecting || status == ZNet.ConnectionStatus.Connected)
+            {
+                unconfirmed = null;
+                return;
+            }
             var list = Known();
             if (list.Remove(unconfirmed)) Save(list);
             Plugin.Log.LogInfo("The next join to this address asks PlayFab again: the join through Steam alone failed (" + status + ").");

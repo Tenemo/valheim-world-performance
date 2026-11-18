@@ -27,7 +27,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // Mathf.Max(params float[]) keeps the first value and takes each later one that is greater.

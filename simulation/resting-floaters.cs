@@ -50,7 +50,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // Before an object's wave height is computed, a resting item continues with the next object instead.

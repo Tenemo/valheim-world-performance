@@ -45,7 +45,7 @@ namespace WorldPerformance
             }
             catch
             {
-                patches.UnpatchSelf();
+                patches.UnpatchOwner();
                 throw;
             }
             Running = true;
@@ -55,7 +55,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             WakeAll();
         }
 

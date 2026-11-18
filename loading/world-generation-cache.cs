@@ -66,7 +66,7 @@ namespace WorldPerformance
             Caching && world != null && !world.m_menu && ZNet.instance != null && !ZNet.instance.IsServer() && ForeignOwners() == "";
 
         // Another mod's patch on the generation could make the same key produce a different world.
-        private static string ForeignOwners()
+        internal static string ForeignOwners()
         {
             if (foreignOwners != null) return foreignOwners;
             var owners = new SortedSet<string>();

@@ -8,8 +8,9 @@ namespace WorldPerformance
     // Every frame each water volume writes the same water time into its own copy of the water material, a copy it makes only
     // to hold its depth at its four corners and whether it follows the global wind: about 1.2 µs a volume, 0.22 ms for the 178
     // volumes loaded around the base. The volumes instead share one copy of each material they start with, written once a
-    // frame where the first volume would write it, and keep their depth and wind in their renderer's property block, so every
-    // surface draws with the values it has natively. A volume whose setup has not run yet shares at once with the depth it has.
+    // frame where the first volume would write it, and keep their depth and wind in their renderer's property block beside what
+    // the game keeps there, such as the visible distance the game's Water component sets on a surface, so every surface draws
+    // with the values it has natively. A volume whose setup has not run yet shares at once with the depth it has.
     internal static class SharedWaterTime
     {
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".shared-water-time");
@@ -26,6 +27,9 @@ namespace WorldPerformance
         // Volumes enabled since they last shared, which share at their next update unless their setup has; every other volume
         // updating is known without a lookup.
         private static readonly HashSet<WaterVolume> enabled = new HashSet<WaterVolume>(Identity<WaterVolume>.Instance);
+        // Reused for every surface: the renderer's block is read into it, so the values the game set there stay.
+        private static readonly MaterialPropertyBlock block = new MaterialPropertyBlock();
+        private static readonly float[] forced = new float[4];
         // Set as the game's volume updates start each frame, the only place it updates their materials, so the frame's first
         // update writes the copies' time, as natively the first writes its own.
         private static bool due;
@@ -68,7 +72,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             if (sharing) Switch(false);
         }
 
@@ -138,21 +142,31 @@ namespace WorldPerformance
                 copies[source] = copy;
                 sources[copy] = source;
             }
-            var block = new MaterialPropertyBlock();
             float force = volume.m_forceDepth;
-            block.SetFloatArray(depth, force >= 0f ? new[] { force, force, force, force } : (float[])depths(volume).Clone());
+            float[] values = depths(volume);
+            if (force >= 0f)
+            {
+                for (int corner = 0; corner < forced.Length; corner++) forced[corner] = force;
+                values = forced;
+            }
+            // The block keeps its own copy of the values.
+            renderer.GetPropertyBlock(block);
+            block.SetFloatArray(depth, values);
             block.SetFloat(globalWind, volume.m_useGlobalWind ? 1f : 0f);
             renderer.sharedMaterial = copy;
             renderer.SetPropertyBlock(block);
             surfaces[volume] = (renderer, source);
         }
 
-        // The game's own setup makes the volume its material again, with sharing off or its patch gone, and writes its time.
+        // The game's own setup makes the volume its material again, with sharing off or its patch gone, and writes its time. A
+        // property block cannot drop single values, so the surface's block starts empty and its Water component sets its visible
+        // distance again, as the game's Water.ApplySettings leaves the block natively.
         private static void Restore(WaterVolume volume)
         {
             var (renderer, source) = surfaces[volume];
             if (!renderer) return;
             renderer.SetPropertyBlock(null);
+            if (renderer.TryGetComponent<Water>(out var water) && water.isActiveAndEnabled && ZNet.instance && ZoneSystem.instance) water.ApplySettings();
             renderer.sharedMaterial = source;
             setup.Invoke(volume, null);
             volume.UpdateMaterials();

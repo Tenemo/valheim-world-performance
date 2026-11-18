@@ -29,7 +29,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // Natively the warning follows "if (sector.Biome != biome)", a beq past it; the mod branches on Logs instead.

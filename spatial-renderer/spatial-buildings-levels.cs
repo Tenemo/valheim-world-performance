@@ -8,7 +8,8 @@ namespace WorldPerformance
     // Detail-level checks: each member's level from the camera's distance, and when it is checked again.
     internal static partial class SpatialBuildings
     {
-        // A detail group's world reference point and size, which stay put while the member does.
+        // A detail group's world reference point and size, read when the member is recorded and planned; a member that the
+        // game's scale change, ground physics or Star Level System moves or scales after that is handed back and planned again.
         private static void Place(Detail detail)
         {
             var group = detail.Group;
