@@ -38,9 +38,32 @@ namespace WorldPerformance
 
         internal void Stop()
         {
-            harmony.UnpatchSelf();
-            for (int index = appliedChanges - 1; index >= 0; index--) undo[index]();
+            harmony.UnpatchOwner();
+            for (int index = appliedChanges - 1; index >= 0; index--)
+                try { undo[index](); }
+                catch (Exception error) { Plugin.Fallback(harmony.Id + " could not undo a change: " + error.GetBaseException().Message); }
             appliedChanges = 0;
+        }
+    }
+
+    internal static class PatchOwners
+    {
+        // Harmony's own UnpatchSelf removes one patch at a time and rebuilds the method after each, so a broken patch of this
+        // owner on a method with another of its patches throws out of the rebuild and leaves the rest applied. Removing all of
+        // the owner's patches of a method in one rebuild cannot fail on its own patches, and a method that still cannot be built
+        // leaves the other methods to be unpatched. At quit, when nothing runs these methods again, the wrappers are left.
+        internal static void UnpatchOwner(this Harmony harmony)
+        {
+            if (Plugin.Quitting) return;
+            List<string> failed = null;
+            foreach (var method in harmony.GetPatchedMethods().ToList())
+                try { harmony.Unpatch(method, HarmonyPatchType.All, harmony.Id); }
+                catch (Exception error)
+                {
+                    if (failed == null) failed = new List<string>();
+                    failed.Add(method.FullDescription() + ": " + error.GetBaseException().Message);
+                }
+            if (failed != null) Plugin.Fallback(harmony.Id + " could not remove all its patches: " + string.Join("; ", failed));
         }
     }
 

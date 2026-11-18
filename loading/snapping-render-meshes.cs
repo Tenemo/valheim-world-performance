@@ -42,7 +42,7 @@ namespace WorldPerformance
             if (!Running) return;
             while (waiting.Count > 0) RebuildFirst();
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         private static void Snapping() => snapping = true;

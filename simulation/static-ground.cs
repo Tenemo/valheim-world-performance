@@ -60,7 +60,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             answers.Clear();
             transforms.Clear();
         }

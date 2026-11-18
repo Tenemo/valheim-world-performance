@@ -27,7 +27,7 @@ namespace WorldPerformance
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // The game adds the physics step after this; taking back what the step exceeds the frame's time by leaves the frame's

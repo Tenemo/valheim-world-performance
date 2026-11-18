@@ -22,7 +22,8 @@ namespace WorldPerformance
     internal static class PooledCompression
     {
         internal const string BetterNetworking = "DIT.BetterNetworking10";
-        private const string NotInstalled = "Better Networking is not installed";
+        private const string NotInstalled = "Better Networking is not installed", NotPatchedIn = "Better Networking's Steam compression is not patched in",
+            LogsPackets = "Better Networking logs every packet at its Info level";
         private static readonly System.Version[] Checked = { new System.Version(1, 2, 0), new System.Version(1, 3, 1) };
         // Larger packets go to Better Networking's own methods, so the kept buffers stay within twice this.
         private const int Largest = 1 << 20;
@@ -75,19 +76,21 @@ namespace WorldPerformance
                 catch (Exception error)
                 {
                     Failure = "patching Better Networking failed: " + error;
-                    patches.UnpatchSelf();
+                    patches.UnpatchOwner();
                 }
             }
             Release();
-            if (Failure == NotInstalled) Plugin.Log.LogInfo("Pooled Better Networking compression is off: " + Failure + ".");
-            else Plugin.Log.LogWarning("Pooled Better Networking compression is off, so Better Networking compresses as it does itself: " + Failure + ".");
+            // Better Networking absent, its compression switched off or its per-packet logging chosen in its settings are a
+            // player's own choices; anything else means one of the two mods changed and is reported.
+            if (Failure == NotInstalled || Failure == NotPatchedIn || Failure == LogsPackets) Plugin.Log.LogInfo("Pooled Better Networking compression is off: " + Failure + ".");
+            else Plugin.Fallback("Pooled Better Networking compression is off, so Better Networking compresses as it does itself: " + Failure);
         }
 
         internal static void Stop()
         {
             if (!Running) return;
             Running = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             Release();
         }
 
@@ -113,10 +116,10 @@ namespace WorldPerformance
             // Better Networking patches the game's Steam send and receive only while its compression is on and passed its self-test.
             if (sendPrefix == null || receivePostfix == null || Harmony.GetPatchInfo(gameSend)?.Prefixes.Any(patch => patch.PatchMethod == sendPrefix) != true
                 || Harmony.GetPatchInfo(gameReceive)?.Postfixes.Any(patch => patch.PatchMethod == receivePostfix) != true)
-                return "Better Networking's Steam compression is not patched in";
+                return NotPatchedIn;
             // Its Info level logs each packet, which only its own methods do.
             var log = AccessTools.Property(type, "Log").GetValue(null);
-            if ((bool)AccessTools.Property(log.GetType(), "IsInfo").GetValue(log)) return "Better Networking logs every packet at its Info level";
+            if ((bool)AccessTools.Property(log.GetType(), "IsInfo").GetValue(log)) return LogsPackets;
             peers = (IDictionary)AccessTools.Field(Named("CompressionState"), "Peers").GetValue(null);
             var peer = Named("CompressionState+PeerState");
             sending = AccessTools.FieldRefAccess<bool>(peer, "Sending");

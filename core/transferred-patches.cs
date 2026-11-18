@@ -63,7 +63,7 @@ namespace WorldPerformance
 
     internal static class TransferredPatches
     {
-        private static readonly Harmony core = new Harmony(Plugin.Id + ".game-fixes");
+        private static readonly List<Harmony> fixes = new List<Harmony>();
         private static readonly List<PerformancePatches> integrations = new List<PerformancePatches>();
         private static readonly HashSet<string> olderImplementations = new HashSet<string>();
         private static readonly HashSet<string> deferred = new HashSet<string>();
@@ -71,8 +71,12 @@ namespace WorldPerformance
         internal static string Failure => string.Join("\n", failures);
         internal static bool Running { get; private set; }
 
+        // Progression Fix 1.11.0 handed these implementations to this mod; only an older release still carries them.
+        private static readonly System.Version HandedOver = new System.Version(1, 11, 0);
+
         // New Progression Fix requires this mod, so a reverse soft dependency would make a cycle. Read the installed
-        // plugin's metadata before either load order: only an actual retained implementation defers that feature.
+        // plugin's metadata before either load order: only an actual retained implementation in a release older than the
+        // hand-over defers that feature, so a later class that happens to share a name leaves this mod's feature running.
         private static void FindPreviousOwner()
         {
             foreach (string path in Directory.EnumerateFiles(Paths.PluginPath, "*.dll", SearchOption.AllDirectories))
@@ -82,10 +86,10 @@ namespace WorldPerformance
                 catch (BadImageFormatException) { continue; }
                 using (assembly)
                 {
-                    bool progression = assembly.MainModule.Types.Any(type => type.CustomAttributes.Any(attribute =>
+                    var plugin = assembly.MainModule.Types.SelectMany(type => type.CustomAttributes).FirstOrDefault(attribute =>
                         attribute.AttributeType.FullName == typeof(BepInPlugin).FullName && attribute.ConstructorArguments.Count == 3 &&
-                        (string)attribute.ConstructorArguments[0].Value == "valheim.epiclootprogressionfix"));
-                    if (!progression) continue;
+                        (string)attribute.ConstructorArguments[0].Value == "valheim.epiclootprogressionfix");
+                    if (plugin == null || !System.Version.TryParse(plugin.ConstructorArguments[2].Value as string, out var version) || version >= HandedOver) continue;
                     foreach (var type in assembly.MainModule.Types)
                         if (type.Namespace == "EpicLootProgressionFix") olderImplementations.Add(type.Name);
                 }
@@ -99,12 +103,27 @@ namespace WorldPerformance
             return true;
         }
 
-        private static void PatchTree(Type type)
+        private static void PatchTree(Harmony harmony, Type type)
         {
             if (type.ContainsGenericParameters || type.IsDefined(typeof(CompilerGeneratedAttribute), false)) return;
             RuntimeHelpers.RunClassConstructor(type.TypeHandle);
-            if (type.IsDefined(typeof(HarmonyPatch), false)) core.CreateClassProcessor(type).Patch();
-            foreach (var nested in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)) PatchTree(nested);
+            if (type.IsDefined(typeof(HarmonyPatch), false)) harmony.CreateClassProcessor(type).Patch();
+            foreach (var nested in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)) PatchTree(harmony, nested);
+        }
+
+        // Each fix patches under an owner of its own, so a changed game method takes only that fix off and reports it.
+        private static void Fix(Type type)
+        {
+            if (Previous(type)) return;
+            var harmony = new Harmony(Plugin.Id + ".game-fixes." + type.Name);
+            try { PatchTree(harmony, type); fixes.Add(harmony); }
+            catch (Exception error)
+            {
+                harmony.UnpatchOwner();
+                string message = type.Name + " unavailable: " + error.GetBaseException().Message;
+                failures.Add(message);
+                Plugin.Fallback(message);
+            }
         }
 
         internal static void Start()
@@ -123,9 +142,9 @@ namespace WorldPerformance
                     typeof(ConfigWatcherListings), typeof(PacedGrassRebuilds),
                     typeof(LoadingScreenPriority), typeof(ArrivalConfirmation),
                     typeof(AsyncLocationSpawns) })
-                    if (!Previous(type)) PatchTree(type);
+                    Fix(type);
                 // This is the synchronous fallback of the existing map cache and background packing.
-                if (!Previous(typeof(MapSaveWrites))) PatchTree(typeof(MapSaveWrites));
+                Fix(typeof(MapSaveWrites));
                 Optional(typeof(SendWindow), patches => SendWindow.Initialize(patches, Plugin.Log));
                 Optional(typeof(OwnershipOrder), OwnershipOrder.Initialize);
                 Optional(typeof(ReceivedRecordSaves), ReceivedRecordSaves.Initialize);
@@ -219,7 +238,8 @@ namespace WorldPerformance
         {
             foreach (var patches in integrations.AsEnumerable().Reverse()) patches.Stop();
             integrations.Clear();
-            core.UnpatchSelf();
+            foreach (var harmony in fixes.AsEnumerable().Reverse()) harmony.UnpatchOwner();
+            fixes.Clear();
             Running = false;
         }
     }

@@ -73,7 +73,7 @@ namespace WorldPerformance
                 // A changed game method leaves terrain rebuilds native.
                 Failure = error.Message;
                 Running = false;
-                patches.UnpatchSelf();
+                patches.UnpatchOwner();
                 Plugin.Log.LogWarning("Terrain rebuilds stay native: " + error.Message);
             }
         }
@@ -85,7 +85,7 @@ namespace WorldPerformance
             Running = false;
             batching = 0;
             colouring = null;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
         }
 
         // Valheim 1.0.15: s_tempColors.Add(GetBiomeColor(ix, iy)) for every vertex of a zone tile.

@@ -65,7 +65,7 @@ namespace WorldPerformance
         internal static void Stop()
         {
             Enabled = false;
-            patches.UnpatchSelf();
+            patches.UnpatchOwner();
             foreach (var caster in casters)
                 if (caster.Off && caster.Renderer) caster.Renderer.shadowCastingMode = ShadowCastingMode.On;
             casters.Clear();
@@ -200,6 +200,7 @@ namespace WorldPerformance
         {
             Failure = error.GetType().Name + ": " + error.Message;
             Plugin.Log?.LogError("World Performance small far shadows stopped: " + error);
+            Plugin.Fallback("SmallFarShadows stopped after an error: " + Failure);
             Stop();
         }
     }

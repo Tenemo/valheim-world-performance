@@ -31,6 +31,13 @@ namespace WorldPerformance
             if (!searched)
             {
                 searched = true;
+                // The thread is found and raised through Windows; elsewhere, as on a Linux server, Unity keeps its priority.
+                if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+                {
+                    Failure = "not Windows";
+                    Plugin.Log.LogInfo("The asset loading thread keeps Unity's priority on this platform.");
+                    return;
+                }
                 Find();
             }
             if (thread != IntPtr.Zero && GetThreadPriority(thread) < Normal && SetThreadPriority(thread, Normal)) raises++;
