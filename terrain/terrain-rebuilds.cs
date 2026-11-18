@@ -57,6 +57,7 @@ namespace WorldPerformance
             try
             {
                 var type = typeof(Heightmap);
+                TerrainMeshReuse.Install(patches);
                 patches.Patch(AccessTools.Method(type, "RebuildRenderMesh"), prefix: new HarmonyMethod(typeof(TerrainRebuilds), nameof(Recolour)),
                     transpiler: new HarmonyMethod(typeof(TerrainRebuilds), nameof(ColourOnce)));
                 patches.Patch(AccessTools.Method(type, "RebuildCollisionMesh"), prefix: new HarmonyMethod(typeof(TerrainRebuilds), nameof(Rebuilding)),
@@ -85,6 +86,7 @@ namespace WorldPerformance
             Running = false;
             batching = 0;
             colouring = null;
+            TerrainMeshReuse.Clear();
             patches.UnpatchOwner();
         }
 

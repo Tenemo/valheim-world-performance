@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9
+
+- Returning to edited terrain reuses its unchanged ground and collision meshes.
+- Large supported locations load across multiple frames, reducing the hitch when travelling past them.
+
 ## 1.0.8
 
 - A teleport, portal trip or respawn ends once your destination's buildings and terrain have arrived and been created, also at a busy base where another player keeps fires burning, where it used to wait the full 8 seconds, and at a high frame rate it no longer ends while the area is still being created.
