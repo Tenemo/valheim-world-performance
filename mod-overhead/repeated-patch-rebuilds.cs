@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using BepInEx.Bootstrap;
 using BepInEx.Logging;
@@ -13,7 +14,9 @@ namespace WorldPerformance
     // it patches again in its start now keeps the wrapper built for its first patch there until that start ends, and then
     // gets one wrapper with all its patches, built from the same patch list the last of those rebuilds would read. Its start
     // calls none of these methods in between on a client, where this runs. New callers own that boundary with contract 1;
-    // the log watcher supports only older releases that predate the explicit scope. Harmony's internals remain checked.
+    // the log watcher supports only older releases that predate the explicit scope. Harmony's internals remain checked. A
+    // method whose wrapper fails to build drops the patches its start added, newest first, until it builds, and so keeps
+    // what one rebuild after each patch would have left it, and the dropped patches are reported.
     internal static class RepeatedPatchRebuilds
     {
         internal const string ProgressionFixId = "valheim.epiclootprogressionfix";
@@ -25,6 +28,9 @@ namespace WorldPerformance
         private static readonly Dictionary<MethodBase, MethodInfo> built = new Dictionary<MethodBase, MethodInfo>();
         private static readonly List<MethodBase> pending = new List<MethodBase>();
         private static readonly HashSet<MethodBase> pendingSet = new HashSet<MethodBase>();
+        // Each waiting method's patches as its last rebuild saw them, and the patches each later rebuild added, oldest first.
+        private static readonly Dictionary<MethodBase, HashSet<Patch>> seenPatches = new Dictionary<MethodBase, HashSet<Patch>>();
+        private static readonly Dictionary<MethodBase, List<Patch[]>> added = new Dictionary<MethodBase, List<Patch[]>>();
         private static Func<MethodBase, PatchInfo, MethodInfo> updateWrapper;
         private static Action<MethodBase, MethodInfo> addReplacementOriginal;
         private static object locker;
@@ -74,18 +80,49 @@ namespace WorldPerformance
             initialized = true;
         }
 
-        private static bool Prefix(MethodBase original, ref MethodInfo __result)
+        private static bool Prefix(MethodBase original, PatchInfo patchInfo, ref MethodInfo __result)
         {
             if (!active || flushing || original == null || !built.TryGetValue(original, out var replacement)) return true;
             if (pendingSet.Add(original)) pending.Add(original);
+            var now = Patches(patchInfo);
+            var previous = seenPatches[original];
+            if (!added.TryGetValue(original, out var steps)) added[original] = steps = new List<Patch[]>();
+            steps.Add(now.Where(patch => !previous.Contains(patch)).ToArray());
+            seenPatches[original] = now;
             Deferred++;
             __result = replacement;
             return false;
         }
 
-        private static void Postfix(MethodBase original, MethodInfo __result)
+        private static void Postfix(MethodBase original, PatchInfo patchInfo, MethodInfo __result)
         {
-            if (active && !flushing && original != null && __result != null && !built.ContainsKey(original)) built[original] = __result;
+            if (active && !flushing && original != null && __result != null && !built.ContainsKey(original))
+            {
+                built[original] = __result;
+                seenPatches[original] = Patches(patchInfo);
+            }
+        }
+
+        private static HashSet<Patch> Patches(PatchInfo info) =>
+            new HashSet<Patch>(info.prefixes.Concat(info.postfixes).Concat(info.transpilers).Concat(info.finalizers).Concat(info.ilmanipulators));
+
+        // Removes the latest additions until the wrapper builds; with all of them gone the wrapper of the first rebuild stays.
+        private static string Recover(MethodBase original, PatchInfo info)
+        {
+            var dropped = new List<string>();
+            var steps = added.TryGetValue(original, out var list) ? list : new List<Patch[]>();
+            for (int step = steps.Count - 1; step >= 0; step--)
+            {
+                foreach (var patch in steps[step])
+                {
+                    info.RemovePatch(patch.PatchMethod);
+                    dropped.Add(patch.owner + " " + patch.PatchMethod.FullDescription());
+                }
+                if (step == 0) break;
+                try { addReplacementOriginal(original, updateWrapper(original, info)); break; }
+                catch (Exception) { }
+            }
+            return string.Join(", ", dropped);
         }
 
         // Builds each waiting method's wrapper once, from its patch list as it stands now.
@@ -100,11 +137,13 @@ namespace WorldPerformance
                 {
                     foreach (var original in pending)
                     {
-                        try { addReplacementOriginal(original, updateWrapper(original, original.ToPatchInfo())); }
+                        var info = original.ToPatchInfo();
+                        try { addReplacementOriginal(original, updateWrapper(original, info)); }
                         catch (Exception error)
                         {
                             failure = error;
-                            Plugin.Fallback("Progression Fix's patches of " + original.FullDescription() + " could not be built: " + error.Message);
+                            Plugin.Fallback("Progression Fix's patches of " + original.FullDescription() + " could not be built: " + error.Message +
+                                "; dropped " + Recover(original, info));
                         }
                     }
                 }
@@ -115,6 +154,8 @@ namespace WorldPerformance
                 pending.Clear();
                 pendingSet.Clear();
                 built.Clear();
+                seenPatches.Clear();
+                added.Clear();
             }
             if (failure != null && scope != null) throw new InvalidOperationException("Startup patch batch could not finish.", failure);
         }
