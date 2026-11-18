@@ -85,7 +85,11 @@ namespace WorldPerformance
             }
         }
 
-        private static System.Reflection.FieldInfo sentRecords, sentTime;
+        // Read when the feature starts, so a game update that renames them fails its start instead of each arrival.
+        private static readonly System.Reflection.FieldInfo sentRecords = Required(AccessTools.Field(AccessTools.Inner(typeof(ZDOMan), "ZDOPeer"), "m_zdos"), "ZDOPeer.m_zdos"),
+            sentTime = Required(AccessTools.Field(AccessTools.Inner(AccessTools.Inner(typeof(ZDOMan), "ZDOPeer"), "PeerZDOInfo"), "m_syncTime"), "PeerZDOInfo.m_syncTime");
+        private static System.Reflection.FieldInfo Required(System.Reflection.FieldInfo field, string name) =>
+            field ?? throw new MissingFieldException("The game's " + name + " is missing.");
 
         // A record counts as sent once the peer holds its current revision, or one sent after the request: an owner's game
         // rewrites records such as a burning fire's time every few seconds, and at a busy base one of them is nearly always
@@ -108,15 +112,7 @@ namespace WorldPerformance
             foreach (var record in records)
             {
                 if (record.Type < ZDO.ObjectType.Solid || !shouldSend(updatePeer, record)) continue;
-                if (held == null)
-                {
-                    if (sentRecords == null)
-                    {
-                        sentRecords = AccessTools.Field(updatePeer.GetType(), "m_zdos");
-                        sentTime = AccessTools.Field(AccessTools.Inner(updatePeer.GetType(), "PeerZDOInfo"), "m_syncTime");
-                    }
-                    held = (System.Collections.IDictionary)sentRecords.GetValue(updatePeer);
-                }
+                if (held == null) held = (System.Collections.IDictionary)sentRecords.GetValue(updatePeer);
                 var info = held[record.m_uid];
                 if (info == null || (float)sentTime.GetValue(info) < asked) { sent = false; break; }
             }
