@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12
+
+- A frost foundry's plinth sinks while it works and rises when the item is done, instead of staying where it was when the base was last loaded.
+- StarLevelSystem 1.34.0 is supported.
+
 ## 1.0.11
 
 - Morkhalla's rooms load and unload across several frames, so arriving at or leaving one no longer stalls the game for a fifth of a second.
