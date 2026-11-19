@@ -8,18 +8,18 @@ using UnityEngine;
 
 namespace WorldPerformance
 {
-    // A player's game builds a dungeon's interior from its saved room list in the frame its last room model finishes
-    // loading: 151-252 ms a dungeon in Tenemo's session of 2026-11-03. The rooms now go in over consecutive frames, at most
-    // 4 ms of placing a frame, and the zone counts as loading until the last one, so teleports and respawns still wait for
-    // the whole interior. Each room seeds its own random state from its position, so the interior comes out as it would in
-    // one frame. A player inside that interior, teleporting or not yet spawned, and the dedicated server get the native
-    // single frame.
+    // Place saved rooms in order and check the frame budget between rooms. Large Morkhalla models
+    // are copied while inactive before the game sets their seed's choices. The zone stays loading
+    // through the last room. Placement inside the same interior, at spawn and during teleports
+    // stays synchronous, as does placement on the dedicated server.
     internal static class PacedDungeonRooms
     {
         // The isolated test client sets 0 to compare the native single frame.
         internal static float BudgetMilliseconds = 4f;
         internal static long Paced, Frames;
         private static readonly HashSet<DungeonGenerator> placing = new HashSet<DungeonGenerator>();
+        private static readonly Dictionary<DungeonGenerator, DungeonRoomCopy> pending = new Dictionary<DungeonGenerator, DungeonRoomCopy>();
+        internal static DungeonRoomCopy Preparing { get; private set; }
         private static readonly FieldInfo loadedRooms = AccessTools.Field(typeof(DungeonGenerator), "m_loadedRooms");
         private static readonly Type placement = AccessTools.Inner(typeof(DungeonGenerator), "RoomPlacementData");
         private static readonly FieldInfo roomData = AccessTools.Field(placement, "m_roomData"), position = AccessTools.Field(placement, "m_position"), rotation = AccessTools.Field(placement, "m_rotation");
@@ -61,7 +61,15 @@ namespace WorldPerformance
         [HarmonyPatch(typeof(DungeonGenerator), "OnDestroy")]
         private static class Destroyed
         {
-            private static void Prefix(DungeonGenerator __instance) => placing.Remove(__instance);
+            private static void Prefix(DungeonGenerator __instance)
+            {
+                placing.Remove(__instance);
+                if (pending.TryGetValue(__instance, out var copy))
+                {
+                    pending.Remove(__instance);
+                    copy.Discard();
+                }
+            }
         }
 
         private static IEnumerator Place(DungeonGenerator generator)
@@ -80,7 +88,33 @@ namespace WorldPerformance
                     Frames++;
                 }
                 object room = rooms.GetValue(index);
-                placeRoom(generator, (DungeonDB.RoomData)roomData.GetValue(room), (Vector3)position.GetValue(room), (Quaternion)rotation.GetValue(room), null, ZoneSystem.SpawnMode.Client);
+                var data = (DungeonDB.RoomData)roomData.GetValue(room);
+                var point = (Vector3)position.GetValue(room);
+                var orientation = (Quaternion)rotation.GetValue(room);
+                DungeonRoomCopy copy = null;
+                if (generator.gameObject.name.StartsWith("DG_MorkHalla", StringComparison.Ordinal) && data.m_prefab.IsLoaded)
+                {
+                    try { copy = new DungeonRoomCopy(generator.transform, data.m_prefab, point, orientation); }
+                    catch (Exception error) { Plugin.Fallback("Dungeon room cloning continued synchronously: " + error); }
+                }
+                if (copy != null)
+                {
+                    pending.Add(generator, copy);
+                    yield return copy.Operation;
+                    if (!generator || !placing.Contains(generator)) yield break;
+                    pending.Remove(generator);
+                }
+                var previous = Preparing;
+                try
+                {
+                    Preparing = copy;
+                    placeRoom(generator, data, point, orientation, null, ZoneSystem.SpawnMode.Client);
+                }
+                finally
+                {
+                    Preparing = previous;
+                    copy?.Discard();
+                }
             }
             SnapToGround.SnappAll();
             loadedRooms.SetValue(generator, null);

@@ -40,6 +40,8 @@ namespace WorldPerformance
         private static readonly AccessTools.FieldRef<ZNetScene, List<ZNetView>> removed = AccessTools.FieldRefAccess<ZNetScene, List<ZNetView>>("m_tempRemoved");
         private static readonly List<ZDO> departedRecords = new List<ZDO>(), gone = new List<ZDO>();
 
+        private static readonly int morkhalla = "DG_MorkHalla".GetStableHashCode();
+
         // Last, so other mods' prefixes have added what they keep to the lists.
         [HarmonyPriority(Priority.Last)]
         private static bool Prefix(ZNetScene __instance, List<ZDO> currentNearObjects, List<ZDO> currentDistantObjects)
@@ -101,6 +103,8 @@ namespace WorldPerformance
                 var data = departedRecords[i];
                 loaded.Remove(data);
                 departed[i].ResetZDO();
+                if (data.GetPrefab() == morkhalla)
+                    DungeonRoomDisposal.Retire(__instance, departed[i].transform);
                 Object.Destroy(departed[i].gameObject);
                 Release(data);
             }

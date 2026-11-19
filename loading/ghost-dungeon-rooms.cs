@@ -39,6 +39,9 @@ namespace WorldPerformance
 
         private static GameObject Instantiate(SoftReference<GameObject> prefab, Vector3 position, Quaternion rotation, Transform parent, ZoneSystem.SpawnMode mode)
         {
+            if (mode == ZoneSystem.SpawnMode.Client && PacedDungeonRooms.Preparing is DungeonRoomCopy copy &&
+                copy.Take(prefab, position, rotation, parent) is GameObject room)
+                return room;
             if (!StandIns || mode != ZoneSystem.SpawnMode.Ghost || ZNet.instance == null || !ZNet.instance.IsDedicated())
                 return SoftReferenceableAssets.Utils.Instantiate(prefab, position, rotation, parent);
             return StandIn(prefab.Asset, position, rotation, parent);
