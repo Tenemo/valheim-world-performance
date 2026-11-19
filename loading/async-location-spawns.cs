@@ -77,7 +77,8 @@ namespace WorldPerformance
                     Complete(__instance, copy, ref __result, ref ___m_instance);
                     return false;
                 }
-                if (ZNet.instance == null || ZNet.instance.IsServer()) return true;
+                // Leaving the world drains every copy; a proxy that updates later in that frame spawns natively, as the game does.
+                if (ZNet.instance == null || ZNet.instance.IsServer() || Game.instance == null || Game.instance.IsShuttingDown()) return true;
                 var data = view(__instance)?.GetZDO();
                 if (data == null) return true;
                 int hash = data.GetInt(ZDOVars.s_location);
@@ -343,8 +344,10 @@ namespace WorldPerformance
                         transferred = true;
                         if (copy.Proxy)
                         {
-                            Attach(copy);
+                            // The game's copy wakes before it is parented to the proxy, so components that look for a parent
+                            // network view on waking find none.
                             instance.SetActive(true);
+                            Attach(copy);
                         }
                     }
                 }
@@ -369,6 +372,11 @@ namespace WorldPerformance
             {
                 try
                 {
+                    // Entries the seed did not reach go back as shipped; the game's own reset then leaves the randomized ones as
+                    // the game leaves them after a copy, every entry on and each spawn's off object off.
+                    if (copy.ChoiceStates != null)
+                        foreach (var (target, active) in copy.ChoiceStates)
+                            if (target && target.activeSelf != active) target.SetActive(active);
                     for (int i = 0; i < copy.RandomizedSpawns; i++) if (copy.Spawns[i]) copy.Spawns[i].Reset();
                     for (int i = 0; i < copy.RandomizedObjects; i++) if (copy.Objects[i]) copy.Objects[i].Reset();
                 }
@@ -383,9 +391,6 @@ namespace WorldPerformance
                 {
                     // RandomSpawn can turn off a child view before the explicit network-view loop is reached.
                     foreach (var view in copy.Views) if (view && !view.gameObject.activeSelf) view.gameObject.SetActive(true);
-                    if (copy.ChoiceStates != null)
-                        foreach (var (target, active) in copy.ChoiceStates)
-                            if (target && target.activeSelf != active) target.SetActive(active);
                     var asset = copy.Location.m_prefab.Asset;
                     asset.transform.SetPositionAndRotation(copy.Position, copy.Rotation);
                     if (copy.Interior)
