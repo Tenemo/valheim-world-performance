@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11
+
+- Morkhalla's rooms load and unload across several frames, so arriving at or leaving one no longer stalls the game for a fifth of a second.
+
 ## 1.0.10
 
 - The first automatic save after joining no longer pauses the game to pack your map.
