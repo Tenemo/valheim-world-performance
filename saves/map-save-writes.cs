@@ -14,14 +14,31 @@ namespace WorldPerformance
     {
         private static readonly AccessTools.FieldRef<ZPackage, BinaryWriter> Writer = AccessTools.FieldRefAccess<ZPackage, BinaryWriter>("m_writer");
 
+        // Inline bytes of a 64-bit word are the eight booleans the game writes for one packed byte.
+        private static readonly ulong[] expandedFlags = ExpandBytes();
+
+        private static ulong[] ExpandBytes()
+        {
+            var table = new ulong[256];
+            var bytes = new byte[8];
+            for (int value = 0; value < table.Length; value++)
+            {
+                for (int bit = 0; bit < bytes.Length; bit++)
+                    bytes[bit] = (byte)((value >> bit) & 1);
+                table[value] = BitConverter.ToUInt64(bytes, 0);
+            }
+            return table;
+        }
+
         private static void WriteExploration(ZPackage package, BitArray explored, BitArray exploredOthers)
         {
             var buffer = new byte[8192];
-            WriteFlags(Writer(package), explored, explored.Length, buffer);
-            WriteFlags(Writer(package), exploredOthers, explored.Length, buffer);
+            var words = new ulong[buffer.Length / 8];
+            WriteFlags(Writer(package), explored, explored.Length, buffer, words);
+            WriteFlags(Writer(package), exploredOthers, explored.Length, buffer, words);
         }
 
-        private static void WriteFlags(BinaryWriter writer, BitArray flags, int count, byte[] buffer)
+        private static void WriteFlags(BinaryWriter writer, BitArray flags, int count, byte[] buffer, ulong[] words)
         {
             if (flags.Length < count) throw new ArgumentOutOfRangeException(nameof(count));
             var packed = new byte[(flags.Length + 7) / 8];
@@ -29,11 +46,11 @@ namespace WorldPerformance
             for (int start = 0; start < count; start += buffer.Length)
             {
                 int length = Math.Min(buffer.Length, count - start);
-                for (int index = 0; index < length; index++)
-                {
-                    int bit = start + index;
-                    buffer[index] = (byte)((packed[bit >> 3] >> (bit & 7)) & 1);
-                }
+                int source = start / 8;
+                int packedLength = (length + 7) / 8;
+                for (int index = 0; index < packedLength; index++)
+                    words[index] = expandedFlags[packed[source + index]];
+                Buffer.BlockCopy(words, 0, buffer, 0, length);
                 writer.Write(buffer, 0, length);
             }
         }

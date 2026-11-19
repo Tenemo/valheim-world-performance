@@ -55,6 +55,8 @@ namespace WorldPerformance
         internal static long WorkerPacked { get; private set; }
         internal static long Failed { get; private set; }
 
+        private static readonly Func<Minimap, byte[]> packMap = AccessTools.MethodDelegate<Func<Minimap, byte[]>>(AccessTools.Method(typeof(Minimap), "GetMapData"));
+
         internal static void Start()
         {
             if (Running) return;
@@ -62,6 +64,7 @@ namespace WorldPerformance
             var game = typeof(Game);
             patches.Patch(AccessTools.Method(typeof(Minimap), "GetMapData"), prefix: new HarmonyMethod(typeof(MapDataPacking), nameof(Pack)),
                 postfix: new HarmonyMethod(typeof(MapDataPacking), nameof(Keep)));
+            patches.Patch(AccessTools.Method(typeof(Minimap), "LoadMapData"), postfix: new HarmonyMethod(typeof(MapDataPacking), nameof(VerifyLoadedMap)));
             patches.Patch(AccessTools.Method(game, nameof(Game.SavePlayerProfile)), prefix: new HarmonyMethod(typeof(MapDataPacking), nameof(Defer)) { priority = Priority.First });
             patches.Patch(AccessTools.Method(game, "UpdateSaving"), prefix: new HarmonyMethod(typeof(MapDataPacking), nameof(TimerAsking)),
                 finalizer: new HarmonyMethod(typeof(MapDataPacking), nameof(TimerDone)));
@@ -75,6 +78,15 @@ namespace WorldPerformance
             FinishWaiting();
             Running = false;
             patches.UnpatchOwner();
+        }
+
+        // The first timer save needs a verified encoder even when the player has explored since joining.
+        // Check the actual native map while the client is still loading it for the first spawn.
+        private static void VerifyLoadedMap(Minimap __instance)
+        {
+            if (verified != 0 || verifying || !Deferring || Player.m_localPlayer || !ZNet.instance || ZNet.instance.IsDedicated()) return;
+            try { packMap(__instance); }
+            catch (Exception error) { Plugin.Log.LogWarning("Could not verify the map encoder during loading: " + error); }
         }
 
         private static void TimerAsking() => timerSave = true;
