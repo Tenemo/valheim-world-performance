@@ -102,7 +102,8 @@ namespace WorldPerformance
         // Behaviours that change how a piece looks only by switching objects of its own on and off, with the objects each one
         // switches and the methods that do it. The methods are patched to compare those objects and hand the piece back to
         // native drawing when they changed what it draws, as the game's own wear, wetness and snow visuals do. A cooking
-        // station also creates and destroys the models of the food in its slots, which a record leaves out (see Components).
+        // station also creates and destroys the models of the food in its slots and may move a part while it works, which a
+        // record leaves out (see Components).
         private static readonly (Type type, string[] objects, string[] methods)[] switchedBehaviours = {
             (typeof(Container), new[] { "m_open", "m_closed" }, new[] { "UpdateUseVisual" }),
             (typeof(Fireplace), new[] { "m_enabledObject", "m_enabledObjectHigh", "m_enabledObjectLow", "m_fullObject", "m_halfObject", "m_emptyObject",

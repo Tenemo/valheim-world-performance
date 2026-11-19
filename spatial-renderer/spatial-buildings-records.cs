@@ -211,7 +211,8 @@ namespace WorldPerformance
         // Collects a hierarchy's mesh renderers and detail groups, or names the component that keeps it native. Objects a
         // local behaviour moves, and everything under them, are left out instead of keeping the whole piece native, as are
         // an item stand's attach point and a cooking station's slots, under which the game creates the models of the item and
-        // the food they hold and destroys them at the end of the frame they change in.
+        // the food they hold and destroys them at the end of the frame they change in, and the part a cooking station such as
+        // the frost foundry moves while it works.
         private static string Components(GameObject root, List<MeshRenderer> renderers, List<LODGroup> groups, HashSet<Type> allowed)
         {
             root.GetComponentsInChildren(true, components);
@@ -227,8 +228,11 @@ namespace WorldPerformance
                         if (!allowed.Contains(type) && !inertComponents.Contains(type.Name)) return "behaviour " + type.Name;
                         if (localBehaviours.Contains(type)) localRoots.Add(behaviour.transform);
                         else if (behaviour is ItemStand stand) { if (stand.m_attachOther) localRoots.Add(stand.m_attachOther); }
-                        else if (behaviour is CookingStation station && station.m_slots != null)
-                            foreach (var slot in station.m_slots) if (slot) localRoots.Add(slot);
+                        else if (behaviour is CookingStation station)
+                        {
+                            if (station.m_slots != null) foreach (var slot in station.m_slots) if (slot) localRoots.Add(slot);
+                            if (station.m_moveObjectWhileCooking && station.m_objectToMove) localRoots.Add(station.m_objectToMove);
+                        }
                     }
                     else if (component is Rigidbody) return "rigidbody";
                     else if (component is Animator || component is Animation) return "animation";
