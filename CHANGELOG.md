@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.10
+
+- The first automatic save after joining no longer pauses the game to pack your map.
+- Locations loaded across several frames set themselves up exactly as the game's own copies do, also when you log out while one is loading.
+
 ## 1.0.9
 
 - Returning to edited terrain reuses its unchanged ground and collision meshes.
