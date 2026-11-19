@@ -44,7 +44,7 @@ namespace WorldPerformance
             { EpicLoot, new[] { "0.15.4", "0.15.5", "0.15.6" } }, { EquipmentAndQuickSlots, new[] { "3.2.1" } }, { WieldWhileSwimming, new[] { "1.1.4" } },
             { AzuClock, new[] { "1.1.1" } }, { BetterBeehives, new[] { "1.3.1" } }, { ComfortMe, new[] { "1.3.1" } },
             { FedoHud, new[] { "1.1.2" } }, { NoSmokeStayLit, new[] { "2.4.4" } }, { TameRidingOverhaul, new[] { "0.1.20" } },
-            { Treadwell, new[] { "1.0.1" } }, { StarLevelSystem, new[] { "1.33.0" } },
+            { Treadwell, new[] { "1.0.1" } }, { StarLevelSystem, new[] { "1.33.0", "1.34.0" } },
             { Jotunn, new[] { "2.30.2" } },
             { Sailing, new[] { "1.1.12" } },
             { ConditionalConfigSync, new[] { "1.0.11" } },
