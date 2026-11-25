@@ -139,6 +139,9 @@ namespace WorldPerformance
         public static bool[] DistantSignWritingState(Sign sign) { var (registered, hidden) = DistantSignWriting.State(sign); return new[] { registered, hidden }; }
         public static string DistantSignWritingFailure => DistantSignWriting.Failure;
         public static bool PaceMistEmitter { get => MistEmitterRate.Pacing; set => MistEmitterRate.Pacing = value; }
+        // The shipped feature; the isolated client switches it off and on for checks and paired measurements.
+        public static bool KeepExtensionStopTimes { get => ExtensionConnections.Keeping; set => ExtensionConnections.Keeping = value; }
+        public static long[] ExtensionConnectionsCounts() => new[] { ExtensionConnections.Restarts, ExtensionConnections.Stops, ExtensionConnections.Pending, ExtensionConnections.Running ? 1 : 0 };
 
         // The spatial building renderer starts with the first world; the isolated client switches it off and on, and to native
         // drawing in place, for checks and paired measurements, has lights draw whole merged meshes or leave out their merged

@@ -121,6 +121,7 @@ namespace WorldPerformance
             Guard(nameof(SnapPointSearch), SnapPointSearch.Start, SnapPointSearch.Stop);
             Guard(nameof(ComfortPanelRefresh), ComfortPanelRefresh.Start, ComfortPanelRefresh.Stop);
             Guard(nameof(IdleVines), IdleVines.Start, IdleVines.Stop);
+            Guard(nameof(ExtensionConnections), ExtensionConnections.Start, ExtensionConnections.Stop);
             Guard(nameof(MistEmitterRate), MistEmitterRate.Start, MistEmitterRate.Stop);
             Guard(nameof(BarsBehindCamera), BarsBehindCamera.Start, BarsBehindCamera.Stop);
             Guard(nameof(DistantSignWriting), DistantSignWriting.Start, DistantSignWriting.Stop);
@@ -297,6 +298,7 @@ namespace WorldPerformance
             Finish(SnapPointSearch.Stop);
             Finish(ComfortPanelRefresh.Stop);
             Finish(IdleVines.Stop);
+            Finish(ExtensionConnections.Stop);
             Finish(MistEmitterRate.Stop);
             Finish(BarsBehindCamera.Stop);
             Finish(DistantSignWriting.Stop);
