@@ -76,6 +76,8 @@ namespace WorldPerformance
                 if (tile != null && ReferenceEquals(tile.Map, __instance)) { tile.Vertices = null; tile.CheckedFrame = -1; }
         }
 
+        internal static void ForgetWorld() => Array.Clear(tiles, 0, tiles.Length);
+
         // A zone loaded again gets a new heightmap at the same place.
         private static void Destroyed(Heightmap __instance)
         {

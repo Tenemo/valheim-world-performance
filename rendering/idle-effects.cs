@@ -174,6 +174,8 @@ namespace WorldPerformance
             catch (Exception error) { Fail(error); }
         }
 
+        internal static void ForgetWorld() => started.RemoveWhere(system => !system);
+
         // When the weather changes, and once for every weather as the world starts.
         private static void WeatherSwitched(GameObject[] psystems)
         {

@@ -23,6 +23,14 @@ namespace WorldPerformance
         private static int lastRecords, lastZones;
         private static bool created;
 
+        // A world's zone system and its zone tables go with it; the next world's first pass runs natively.
+        internal static void ForgetWorld()
+        {
+            zoneSystem = null;
+            zones = loadingZones = null;
+            lastPass = float.NegativeInfinity;
+        }
+
         [HarmonyPriority(Priority.First)]
         private static bool Prefix()
         {

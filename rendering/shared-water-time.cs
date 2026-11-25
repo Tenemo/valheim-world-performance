@@ -124,6 +124,20 @@ namespace WorldPerformance
             enabled.Remove(__instance);
         }
 
+        // The world's volumes and the materials they started with are gone at its end, and so do their shared copies.
+        internal static void ForgetWorld()
+        {
+            foreach (var pair in new List<KeyValuePair<Material, Material>>(copies))
+                if (!pair.Key || !pair.Value)
+                {
+                    if (pair.Value) Object.Destroy(pair.Value);
+                    copies.Remove(pair.Key);
+                    sources.Remove(pair.Value);
+                }
+            foreach (var volume in new List<WaterVolume>(surfaces.Keys)) if (!volume) surfaces.Remove(volume);
+            enabled.RemoveWhere(volume => !volume);
+        }
+
         private static Material SourceOf(Material material) => sources.TryGetValue(material, out var source) ? source : material;
 
         // The volume draws with its starting material's shared copy and keeps the depth and wind the game's setup gives it.

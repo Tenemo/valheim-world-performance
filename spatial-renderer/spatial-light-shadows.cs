@@ -111,6 +111,21 @@ namespace WorldPerformance
             skipMaterial = null;
         }
 
+        // What the world's end left: its cameras, lights and probes and the sky camera's shader, which Unity has destroyed.
+        // Every one of them is compared by Unity's equality or truth, which treats destroyed and none alike, and a light
+        // search under way starts again among the next world's lights.
+        internal static void ForgetWorld()
+        {
+            rendererList.Clear();
+            groupList.Clear();
+            skyCamera = null;
+            skyDepthCamera = null;
+            skyReplacement = null;
+            searching = null;
+            foreach (var probe in new List<ReflectionProbe>(changedProbes.Keys)) if (!probe) changedProbes.Remove(probe);
+            foreach (var light in new List<Light>(changedSuns.Keys)) if (!light) changedSuns.Remove(light);
+        }
+
         // Realtime reflection probes see the twins of meshes on the layers they see and the lights' renderers, and twins move
         // when those layers change, as when a world loads.
         private static void WatchProbes()

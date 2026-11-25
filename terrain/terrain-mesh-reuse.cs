@@ -112,6 +112,8 @@ namespace WorldPerformance
             Patch("RebuildRenderMesh", nameof(BuildRender), nameof(RecordRender));
         }
         internal static void Clear() => tiles = new ConditionalWeakTable<Heightmap, Tile>();
+        // A destroyed tile's last heights go with it, though other code may still refer to the tile.
+        internal static void Forget(Heightmap tile) => tiles.Remove(tile);
 
         private static bool ClientTile(Heightmap tile) => !tile.IsDistantLod && ZNet.instance && !ZNet.instance.IsDedicated();
 

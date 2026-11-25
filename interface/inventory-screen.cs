@@ -281,6 +281,7 @@ namespace WorldPerformance
         }
 
         internal static void Forget() { description = null; hoveredItem = null; }
+        internal static void ForgetWorld() { Forget(); recipeItem = null; hoveredTooltip = null; }
 
         private static void Changed() => version++;
 

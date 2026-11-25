@@ -47,6 +47,8 @@ namespace WorldPerformance
         // table filled. Unity holds a live heightmap's script object itself, so the entry stays filled while its zone is loaded.
         private static readonly Dictionary<Collider, WeakReference<Heightmap>> grounds = new Dictionary<Collider, WeakReference<Heightmap>>(new Identity());
 
+        internal static void ForgetWorld() => grounds.Clear();
+
         internal static void Initialize(PerformancePatches harmony)
         {
             friction = AccessTools.Method(typeof(Character), "UpdateBodyFriction");

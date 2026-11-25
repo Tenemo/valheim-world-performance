@@ -94,6 +94,8 @@ namespace WorldPerformance
             return true;
         }
 
+        internal static void ForgetWorld() => boundVolume = null;
+
         // The highest level WaterVolume.GetWaterSurface can return anywhere in the volume this frame; positive infinity when
         // the wind data is outside the ranges the game produces.
         private static float HighestWave(WaterVolume volume)

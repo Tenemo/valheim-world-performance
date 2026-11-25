@@ -34,6 +34,7 @@ namespace WorldPerformance
         }
 
         internal static void Start() => Running = true;
+        internal static void ForgetWorld() => scene = null;
 
         // After the frame in which a world's scene and its prefabs were set up, including those mods add then.
         internal static void LateUpdate()

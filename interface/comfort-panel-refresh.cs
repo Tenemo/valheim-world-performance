@@ -138,6 +138,13 @@ namespace WorldPerformance
         private static bool Exact(Vector2 first, Vector2 second) => first.x == second.x && first.y == second.y;
         private static bool Exact(Color first, Color second) => first.r == second.r && first.g == second.g && first.b == second.b && first.a == second.a;
 
+        // A new world draws with a new HUD and icons, which redraw natively first, as after the world's end.
+        internal static void ForgetWorld()
+        {
+            drawnHud = null; drawnSnapshot = null; drawnText = null; drawnPanel = null; drawnOverlay = null;
+            chipIcon = null; chipPiece = null; chipSnapshot = null; chipPlayer = null; chipHud = null; chip = null; chipBackground = null; chipLabel = null;
+        }
+
         private static bool Redrawing(Hud __0, object __1, out bool __state)
         {
             __state = !Skipping || !PanelUnchanged(__0, __1);
