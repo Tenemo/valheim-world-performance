@@ -9,7 +9,7 @@ using HarmonyLib;
 namespace WorldPerformance
 {
     // Every character save packs the map: both exploration layers, 4.2 million flags each, go into an 8.4 MB package one byte
-    // a flag, which is then gzipped, 35–73 ms on the main thread for Tenemo's map in the hidden client and 43 MB of garbage.
+    // a flag, which is then gzipped, 35–73 ms on the main thread for a well-explored map in the hidden client and 43 MB of garbage.
     // The server asks for a save every ten minutes and the client's own save timer at about the same moment. The mod keeps the
     // last packed map with a snapshot of everything it was packed from: the texture size, both layers' bits and the rest of the
     // package as the game writes it, the saved pins in order and whether the player's position is public. While all of that is

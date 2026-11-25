@@ -10,7 +10,7 @@ namespace WorldPerformance
 {
     // Mono's file watcher, which mods use to reload their config files when they change, lists every watched folder every
     // 750 ms on a thread of its own, once for each watcher. The pack's 28 watchers, 20 of them over the whole config folder
-    // and its subfolders, made 1.5 to 1.8 MB of garbage a second in the hidden client, about a quarter of what Tenemo's game
+    // and its subfolders, made 1.5 to 1.8 MB of garbage a second in the hidden client, about a quarter of what a late-game player's game
     // allocates, and so about one garbage collection in four. Within one polling pass the watchers now share each folder's
     // listing, existence checks and file times, which the first watcher of the pass reads as before; a change made during
     // a pass reaches every watcher by the next one, at most 750 ms later. Answers are kept for half a second at most.

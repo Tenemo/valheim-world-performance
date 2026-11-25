@@ -16,7 +16,7 @@ namespace WorldPerformance
     // get the native answers without casting the ray. The checks act only on an object above its ground or below it; when its
     // kept answer shows neither, they would read the same position, get the same answer and do nothing, so the mod skips them.
     // Checks against solids stay native. Each check also reads the object's position, and reaching its transform through the
-    // engine was the largest part of a check: keeping it cut a check from 0.77 to 0.55 µs at Tenemo's base, where 4,248 of the
+    // engine was the largest part of a check: keeping it cut a check from 0.77 to 0.55 µs at a large base, where 4,248 of the
     // 5,401 objects lie outside the active area and do nothing else. A component's transform never changes, so each object's
     // is kept from its first check until it is destroyed.
     internal static class StaticGround

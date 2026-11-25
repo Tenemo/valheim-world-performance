@@ -9,7 +9,7 @@ using UnityEngine.Rendering;
 namespace WorldPerformance
 {
     // The engine's first system of a frame holds the main thread until the frame it just handed to the render thread has been
-    // presented, so the two threads mostly take turns: 3.9 ms of a 21.9 ms frame at Tenemo's base, more in fixed steps that fit
+    // presented, so the two threads mostly take turns: 3.9 ms of a 21.9 ms frame at a large base, more in fixed steps that fit
     // into each frame. Just before the frame's rendering, the same system waits only for the frame before and the threads
     // overlap. The system also advances the game's time, so rendering, its camera callbacks and end-of-frame coroutines read
     // the next frame's number and time; simulation reads them as before.

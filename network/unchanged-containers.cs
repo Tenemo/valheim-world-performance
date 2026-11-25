@@ -7,7 +7,7 @@ namespace WorldPerformance
     // Once a second every container compares its network record's revision with the one it last loaded, and when the
     // revision moved it reloads its whole inventory from the record's item bytes, every item with its enchantments. The
     // storage of a ship or cart shares the vehicle's record, whose position moves the revision every physics step, so a
-    // loaded ship's hold was rebuilt every second, about 4 ms each for Tenemo's two ships at his base. A reload whose item
+    // loaded ship's hold was rebuilt every second, about 4 ms each for two ships at a large base. A reload whose item
     // bytes equal those the inventory last loaded or saved, with no change made to the inventory since, would rebuild the
     // same items, so it is skipped; the lid and an empty loot bag's removal still follow the record as natively. Any other
     // reload, and any container changed in this game without being saved, loads natively.

@@ -3,7 +3,7 @@ using HarmonyLib;
 
 namespace WorldPerformance
 {
-    // Once an hour the game unloads unused assets wherever the player is, one frame of 280 ms in Tenemo's game and up to
+    // Once an hour the game unloads unused assets wherever the player is, one frame of 280 ms in a late-game player's game and up to
     // 470 ms in the test client. The sleep fade and waiting to respawn unload too once 20 minutes have passed since the last
     // unload, but a client of a dedicated server never pauses, and sleeping waits for every player in bed. The mod holds back
     // an hourly unload that falls due until the first natural pause: a frame in which the loading screen covers the whole view,

@@ -17,7 +17,7 @@ namespace WorldPerformance
     // counts as touching the ground, as the game's sleeping bodies do, and keeps the ground tilt rays and ground data of its
     // last awake step, since it has not moved. Players, swimmers and fliers stay native.
     // An owned creature that has done nothing for half a second, whose body sleeps and whose tilt has settled, runs its fixed
-    // update only every fourth step with the skipped steps' time added; at Tenemo's base that is most of his tames, and each
+    // update only every fourth step with the skipped steps' time added; at a large base that is most of its tames, and each
     // update cost about 20 µs. Anything it does or undergoes runs it again at once, for one step's time: a decision to move
     // or turn, a push, a hit or a heal, a status effect, an attack, water, a rider; a woken body runs it every step. Its settled tilt is not rewritten each
     // update either, since that write moves a lox's body capsules, which sit under its visual, and so woke its body for a

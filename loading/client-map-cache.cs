@@ -9,7 +9,7 @@ namespace WorldPerformance
 {
     // A player's game keeps the generated world map beside a local world's save, but a client of a dedicated server has no
     // save folder and a world record that never passes the cache's version check, so every join generates the whole map
-    // again on the main thread: 5.1 s of Tenemo's join on 2026-11-03. Clients now keep the game's own cache files under
+    // again on the main thread: 5.1 s of a join to a large world in testing. Clients now keep the game's own cache files under
     // BepInEx/cache, one folder per world identity, seed, generator version, game version and map size, and load them
     // as the game loads a local world's map, keeping the maps of the last three worlds joined. Hosts, single-player worlds
     // and worlds another mod's patches shape keep the game's own cache.

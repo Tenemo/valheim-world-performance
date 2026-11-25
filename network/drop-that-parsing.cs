@@ -14,7 +14,7 @@ namespace WorldPerformance
 {
     // A joining player's game reads Drop That 3.1.7's drop tables, locations and settings from the server as compressed
     // YAML, about 3.9 million characters, on the main thread inside the frame that receives them: 2.4-2.5 s of a rejoin at
-    // Tenemo's base on a typical player's client. Each message is now unpacked on the main thread and read on a worker thread, one after
+    // a large base on a typical player's client. Each message is now unpacked on the main thread and read on a worker thread, one after
     // another, with Drop That's own reader, while the main thread goes on with the server's other join messages. The
     // drop conditions whose first reading registers a handler are set up on the main thread first, in the same order. Drop
     // That applies one received message per network update; that update now waits for the message's result if it is not

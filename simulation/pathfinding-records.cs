@@ -10,7 +10,7 @@ namespace WorldPerformance
 {
     // Unity keeps every navigation link in one array of 208-byte records, chained newest first. Removing a link walks that
     // chain from its head to the link's predecessor, one record for each link added after it, and adding or removing a tile's
-    // mesh walks all of it: at Tenemo's base these walks were most of Pathfinding.Update. The mod now keeps each live
+    // mesh walks all of it: at a large base these walks were most of Pathfinding.Update. The mod now keeps each live
     // record's predecessor, its place in the chain and the 16 m cells its bounds cover, by agent type:
     // - just before the engine removes a link, its record moves to the head of the chain, so the engine's walk ends at its
     //   first step and leaves the chain exactly as its own walk would have;
@@ -21,7 +21,7 @@ namespace WorldPerformance
     // Additions and removals by other code show in the engine's change counter and head, and the records are then read again
     // from the chain; while any record is not one of NavMesh.AddLink's, every mesh sees the whole chain.
     // A freed record goes on top of a free list that hands records out last in, first out, so through a session each new
-    // tile's links landed in records scattered by earlier removals, and every step of a walk missed the cache: at Tenemo's
+    // tile's links landed in records scattered by earlier removals, and every step of a walk missed the cache: at a large
     // base the cost of each removal per link held rose from 8.6 to 13.5 ns within an hour. Before links are added after any
     // removal, the free list is now chained again in ascending record order, so new links take neighbouring records.
     // Every link keeps its data, its record, its place in the chain and its routes.

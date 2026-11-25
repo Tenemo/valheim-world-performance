@@ -8,7 +8,7 @@ namespace WorldPerformance
     // While a building piece is held, the game looks for the closest pair of snap points between the placement ghost and the
     // pieces within 10 m every frame. For every piece collider in reach it finds the collider's piece and lists that piece's
     // snap points by testing the tag of each child, once per collider, and then reads every listed point's position again for
-    // each of the ghost's own snap points. At Tenemo's base that search was most of the 1 ms a frame the hammer adds to
+    // each of the ghost's own snap points. At a large base that search was most of the 1 ms a frame the hammer adds to
     // LateUpdate. Here each collider's piece and each piece's snap points are kept, and each point's position is read once a
     // search. Pieces are visited in the game's order and compared with the game's distances, and a point another collider of
     // the same piece would list again can never be strictly closer than its first listing, so the chosen pair, the result and
