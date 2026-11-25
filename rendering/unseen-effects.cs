@@ -83,6 +83,14 @@ namespace WorldPerformance
                 }
         }
 
+        // A marker added to an object that never became active is destroyed without its OnDestroy, so the world's end lets go
+        // of those.
+        internal static void ForgetWorld()
+        {
+            managed.RemoveWhere(effect => !effect);
+            systems.Clear();
+        }
+
         internal static ParticleSystem[] Managed() => managed.Where(effect => effect && effect.System).Select(effect => effect.System).ToArray();
 
         internal static string Report()

@@ -125,6 +125,8 @@ namespace WorldPerformance
             settling.Clear();
         }
 
+        internal static void ForgetWorld() => Forget();
+
         // Doors destroyed with their zones leave entries behind.
         private static void Forget()
         {

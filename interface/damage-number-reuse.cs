@@ -92,6 +92,13 @@ namespace WorldPerformance
             Object.Destroy(faded);
         }
 
+        // A new world's numbers copy a new template, which empties the kept ones anyway.
+        internal static void ForgetWorld()
+        {
+            Clear();
+            template = null;
+        }
+
         private static void Clear()
         {
             foreach (var number in kept)

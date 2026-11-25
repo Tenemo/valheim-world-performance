@@ -90,6 +90,9 @@ namespace WorldPerformance
             patches.UnpatchOwner();
         }
 
+        // The last tile coloured, which holds its world.
+        internal static void ForgetWorld() => colouring = null;
+
         // Valheim 1.0.15: s_tempColors.Add(GetBiomeColor(ix, iy)) for every vertex of a zone tile.
         private static IEnumerable<CodeInstruction> ColourOnce(IEnumerable<CodeInstruction> instructions)
         {

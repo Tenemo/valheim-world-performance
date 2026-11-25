@@ -108,6 +108,9 @@ namespace WorldPerformance
 
         internal static int Transforms => transforms.Count;
 
+        // The world's zone system, whose tiles already took the answers with them.
+        internal static void ForgetWorld() => answering = null;
+
         private static bool GroundHeight(ZoneSystem zones, Vector3 position, out float height)
         {
             if (!Caching) return zones.GetGroundHeight(position, out height);

@@ -132,6 +132,13 @@ namespace WorldPerformance
             stepKnown = false;
         }
 
+        // The last lookup's creature and ground, whose terrain tile holds its world.
+        internal static void ForgetWorld()
+        {
+            lastCreature = null;
+            lastGround = null;
+        }
+
         internal static string Report() => $"skipped writes {Skipped}, wakes {Wakes}, settled {Settled}, rays kept {RaysKept}, cast {RaysCast}, ground data kept {DataKept}, read {DataRead}, spaced skips {SpacedSkips}, spaced runs {SpacedRuns}, stirred {Stirred}, tilts held {TiltsHeld}";
 
         private static Ground Find(Character creature)
