@@ -136,7 +136,7 @@ namespace WorldPerformance
                     typeof(ZoneExpiryChecks), typeof(TerrainResultCapacity), typeof(RemoteFloatingBodies), typeof(LocalizedTextLifetime), typeof(HeadlessRendering),
                     typeof(HeadlessCharacterPreview), typeof(PlantGrowthChecks), typeof(FirstPlantGrowthCheck), typeof(PlantSpacingQuery),
                     typeof(CookingSlotVisuals), typeof(PacedRemovals), typeof(PacedDungeonRooms),
-                    typeof(TerrainSupportForwarders), typeof(BuildButtonSubscriptions), typeof(BuildButtonOrder), typeof(ClientMapCache),
+                    typeof(TerrainSupportForwarders), typeof(BuildButtonOrder), typeof(ClientMapCache),
                     typeof(ParallelBiomePoints), typeof(WorldGenerationCache), typeof(LoadingScreenZones), typeof(PlayerDepartures), typeof(ServerTerrainMeshes),
                     typeof(DamageNumberFading), typeof(DamageNumberReuse), typeof(GhostDungeonRooms),
                     typeof(ConfigWatcherListings), typeof(PacedGrassRebuilds),
