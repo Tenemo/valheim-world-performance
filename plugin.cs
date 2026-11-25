@@ -85,7 +85,7 @@ namespace WorldPerformance
             if (!graphics)
             {
                 Logger.LogInfo(serverGarbageFixes
-                    ? "World Performance loaded without graphics; packages write floats without garbage, network records are sent and read without temporary lists and delegates, active-area tests make no garbage, collision callbacks reuse their objects, and effects and rendering stay native."
+                    ? "World Performance loaded without graphics; packages write floats without garbage, network records are sent and read without temporary delegates, active-area tests make no garbage, collision callbacks reuse their objects, and effects and rendering stay native."
                     : "World Performance loaded without graphics; independent game fixes are active, and [Dedicated server] Garbage fixes enables additional allocation reductions.");
                 return;
             }
