@@ -205,6 +205,7 @@ namespace WorldPerformance
                 Optional(typeof(EpicLootLowHealth), patches => EpicLootLowHealth.Initialize(patches, Plugin.Log));
                 Optional(typeof(EpicLootFrameTrims), patches => EpicLootFrameTrims.Initialize(patches, Plugin.Log));
                 Optional(typeof(EpicLootConvertRefresh), patches => EpicLootConvertRefresh.Initialize(patches, Plugin.Log));
+                Optional(typeof(EpicLootSelectAll), patches => EpicLootSelectAll.Initialize(patches, Plugin.Log));
                 Optional(typeof(SettledAnswers), patches => SettledAnswers.Initialize(patches, Plugin.Log));
                 Optional(typeof(PlayerFirstChecks), patches => PlayerFirstChecks.Initialize(patches, Plugin.Log));
                 Optional(typeof(DyrrPlayerId), patches => DyrrPlayerId.Initialize(patches, Plugin.Log));
