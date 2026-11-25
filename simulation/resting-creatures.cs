@@ -132,7 +132,7 @@ namespace WorldPerformance
             stepKnown = false;
         }
 
-        internal static string Report() => $"skipped writes {Skipped}, wakes {Wakes}, settled {Settled}, rays kept {RaysKept}, cast {RaysCast}, ground data kept {DataKept}, read {DataRead}, spaced skips {SpacedSkips}, spaced runs {SpacedRuns}, stirred {Stirred}, tilts held {TiltsHeld}";
+        internal static string Report() => $"far ground skipped {FarSkipped}, skipped writes {Skipped}, wakes {Wakes}, settled {Settled}, rays kept {RaysKept}, cast {RaysCast}, ground data kept {DataKept}, read {DataRead}, spaced skips {SpacedSkips}, spaced runs {SpacedRuns}, stirred {Stirred}, tilts held {TiltsHeld}";
 
         private static Ground Find(Character creature)
         {
@@ -374,8 +374,35 @@ namespace WorldPerformance
             return code;
         }
 
+        // Only the Ashlands' lava and the Deep North's snow read the lava check's ground reading, and only while the creature is
+        // in them: its biome, the ground height and the heightmap. A creature farther from both than any terrain of theirs
+        // reaches keeps the reading it has, since one taken there names neither. HeatMargin covers the world's own 100 m swing of
+        // both borders and the 64 m terrain tiles and 12 m grid a biome is read from.
+        internal static bool SkippingFarGround = true;
+        private const float HeatMargin = 300f;
+        internal static long FarSkipped;
+        private static readonly AccessTools.FieldRef<Character, Heightmap.Biome> lastBiomes = AccessTools.FieldRefAccess<Character, Heightmap.Biome>("m_lastBiome");
+        private static readonly AccessTools.FieldRef<Character, Heightmap> lastHeightmaps = AccessTools.FieldRefAccess<Character, Heightmap>("m_lastHeightmap");
+
+        private static bool FarFromHeat(Vector3 point) =>
+            new Vector2(point.x, point.z + 4000f).magnitude < 12000f - HeatMargin && new Vector2(point.x, point.z + WorldGenerator.ashlandsYOffset).magnitude < WorldGenerator.ashlandsMinDistance - HeatMargin;
+
         private static void GroundData(ZoneSystem zones, ref Vector3 point, out Vector3 normal, out Heightmap.Biome biome, out Heightmap.BiomeArea area, out Heightmap map, Character character)
         {
+            if (SkippingFarGround && !character.IsPlayer() && FarFromHeat(point))
+            {
+                var last = lastBiomes(character);
+                if (last != Heightmap.Biome.AshLands && last != Heightmap.Biome.DeepNorth)
+                {
+                    FarSkipped++;
+                    normal = Vector3.up;
+                    area = Heightmap.BiomeArea.Everything;
+                    biome = last;
+                    map = lastHeightmaps(character);
+                    if (TryFind(character, out var known)) known.dataKept = false;
+                    return;
+                }
+            }
             if (!ReusingGround || character.IsPlayer())
             {
                 zones.GetGroundData(ref point, out normal, out biome, out area, out map);
