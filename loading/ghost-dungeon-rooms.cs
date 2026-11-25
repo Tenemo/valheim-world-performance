@@ -26,7 +26,7 @@ namespace WorldPerformance
             private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
             {
                 var code = instructions.ToList();
-                var native = AccessTools.Method(typeof(SoftReferenceableAssets.Utils), nameof(SoftReferenceableAssets.Utils.Instantiate),
+                var native = AccessTools.Method(typeof(SoftReferenceUtility), nameof(SoftReferenceUtility.Instantiate),
                     new[] { typeof(SoftReference<GameObject>), typeof(Vector3), typeof(Quaternion), typeof(Transform) });
                 int call = code.FindIndex(instruction => instruction.Calls(native));
                 if (call < 0) throw new System.InvalidOperationException("The game's room placement changed.");
@@ -43,7 +43,7 @@ namespace WorldPerformance
                 copy.Take(prefab, position, rotation, parent) is GameObject room)
                 return room;
             if (!StandIns || mode != ZoneSystem.SpawnMode.Ghost || ZNet.instance == null || !ZNet.instance.IsDedicated())
-                return SoftReferenceableAssets.Utils.Instantiate(prefab, position, rotation, parent);
+                return SoftReferenceUtility.Instantiate(prefab, position, rotation, parent);
             return StandIn(prefab.Asset, position, rotation, parent);
         }
 
