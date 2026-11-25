@@ -29,16 +29,16 @@ namespace WorldPerformance
     internal static unsafe class PathfindingRecords
     {
         private const int Record = 0xD0, Salt = 0xC0, Next = 0xC4;
-        // The client's UnityPlayer.dll of Unity 6000.0.75f1 (file sha256 4d161e15d8ccdb32...): NavMesh_CUSTOM_RemoveLinkInternal,
+        // The client's UnityPlayer.dll of Unity 6000.0.85f2 (file sha256 95174edd85b47b32...): NavMesh_CUSTOM_RemoveLinkInternal,
         // which loads the navigation manager from a global and checks a link's handle, the record allocator,
         // NavMesh::RemoveOffMeshConnection, NavMesh::AddOffMeshConnection, NavMesh::AddTile, NavMesh::RemoveTile and
         // NavMesh::ConnectOffMeshConnection, as relative addresses and lengths. None of these bytes are relocated.
         private static readonly (int start, int length)[] Code =
         {
-            (0x110130, 0xAE), (0xA75BF0, 0x1EE), (0xA6E390, 0x140), (0xA6DB70, 0x74B), (0xA6B3B0, 0x8F1), (0xA6BF70, 0x473), (0xA6D1A0, 0x9CB),
+            (0x110180, 0xAE), (0xA77850, 0x1EE), (0xA6FFF0, 0x140), (0xA6F7D0, 0x74B), (0xA6CF60, 0x8F1), (0xA6DBD0, 0x473), (0xA6EE00, 0x9CB),
         };
-        private const string CodeHash = "e2ba89bdfbc17a3f1948dc594f7f261f53573dd73fe0d12061d9366a7f101b44";
-        private const int ManagerLoad = 0x110136;
+        private const string CodeHash = "4d46ef9cd29c29a01885720efbc84d7f959ecd1884a2cbf9d3813fbc92b43eaf";
+        private const int ManagerLoad = 0x110186;
         // The manager's handle count and table (16-byte entries: salt, then the engine's link reference at +8) and its NavMesh,
         // and in that the free head, record capacity, record array, live head and the change counter that every addition and
         // removal advances. A record holds its agent type at +0 and its bounds from +4 (x, y, z, then the maximum).
