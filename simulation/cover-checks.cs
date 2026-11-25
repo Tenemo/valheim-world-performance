@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
+using Unity.Collections;
 using UnityEngine;
 
 namespace WorldPerformance
@@ -17,7 +18,9 @@ namespace WorldPerformance
     internal static class CoverChecks
     {
         private static readonly AccessTools.FieldRef<Vector3[]> rays = AccessTools.StaticFieldRefAccess<Vector3[]>(AccessTools.Field(typeof(Cover), "m_coverRays"));
-        private static readonly AccessTools.FieldRef<int> mask = AccessTools.StaticFieldRefAccess<int>(AccessTools.Field(typeof(Cover), "m_coverRayMask"));
+        private static readonly AccessTools.FieldRef<NativeArray<RaycastCommand>> commands = AccessTools.StaticFieldRefAccess<NativeArray<RaycastCommand>>(AccessTools.Field(typeof(Cover), "m_commands"));
+        private static readonly AccessTools.FieldRef<NativeArray<RaycastHit>> results = AccessTools.StaticFieldRefAccess<NativeArray<RaycastHit>>(AccessTools.Field(typeof(Cover), "m_results"));
+        private static readonly AccessTools.FieldRef<QueryParameters> query = AccessTools.StaticFieldRefAccess<QueryParameters>(AccessTools.Field(typeof(Cover), "m_queryParameters"));
         private static readonly Action setup = AccessTools.MethodDelegate<Action>(AccessTools.Method(typeof(Cover), "Setup"));
         private static readonly AccessTools.FieldRef<Fireplace, bool> wet = AccessTools.FieldRefAccess<Fireplace, bool>("m_wet");
         private static readonly MethodInfo cover = AccessTools.Method(typeof(Cover), nameof(Cover.GetCoverForPoint));
@@ -74,15 +77,24 @@ namespace WorldPerformance
             coverPercentage = Rays(startPos, minDistance);
         }
 
-        // The cover part of Cover.GetCoverForPoint.
+        // The cover part of Cover.GetCoverForPoint: the rays as one batch in the game's own command and result arrays, a ray
+        // covering where it hit at a distance.
         private static float Rays(Vector3 startPos, float minDistance)
         {
             setup();
-            float hits = 0f;
             var directions = rays();
-            foreach (Vector3 direction in directions)
-                if (Physics.Raycast(startPos + direction * minDistance, direction, out var _, 30f - minDistance, mask())) hits += 1f;
-            return hits / directions.Length;
+            var batch = commands();
+            var hits = results();
+            for (int index = 0; index < directions.Length; index++)
+            {
+                Vector3 direction = directions[index];
+                batch[index] = new RaycastCommand(startPos + direction * minDistance, direction, query(), 30f - minDistance);
+            }
+            RaycastCommand.ScheduleBatch(batch, hits, 1).Complete();
+            float covered = 0f;
+            for (int index = 0; index < hits.Length; index++)
+                if (hits[index].distance > 0f) covered += 1f;
+            return covered / directions.Length;
         }
 
         // Fireplace.CheckWet, casting the cover rays only in strong wind and the roof sphere only when rain decides.
