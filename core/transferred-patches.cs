@@ -169,6 +169,7 @@ namespace WorldPerformance
                 Optional(typeof(FavoriteBorderRedraws), FavoriteBorderRedraws.Initialize);
                 Optional(typeof(InventoryTooltips), InventoryTooltips.Initialize);
                 Optional(typeof(ArmorTooltipText), ArmorTooltipText.Initialize);
+                Optional(typeof(ChestMovePreview), ChestMovePreview.Initialize);
                 Optional(typeof(HeldTextWrites), HeldTextWrites.Initialize);
                 Optional(typeof(SwimmingEquipmentChecks), SwimmingEquipmentChecks.Initialize);
                 Optional(typeof(ClockFontFallback), ClockFontFallback.Initialize);
