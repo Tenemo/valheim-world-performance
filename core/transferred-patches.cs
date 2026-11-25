@@ -42,7 +42,7 @@ namespace WorldPerformance
             { AzuCraftyBoxes, new[] { "1.8.28" } }, { BetterUi, new[] { "2.5.13", "2.5.14" } },
             { ItemStacks, new[] { "1.1.1" } }, { MultiUserChest, new[] { "0.6.2" } }, { FastLink, new[] { "1.5.2", "1.5.3" } },
             { EpicLoot, new[] { "0.15.4", "0.15.5", "0.15.6" } }, { EquipmentAndQuickSlots, new[] { "3.2.1" } }, { WieldWhileSwimming, new[] { "1.1.4" } },
-            { AzuClock, new[] { "1.1.1" } }, { BetterBeehives, new[] { "1.3.1" } }, { ComfortMe, new[] { "1.3.1" } },
+            { AzuClock, new[] { "1.1.1" } }, { BetterBeehives, new[] { "1.3.1" } }, { ComfortMe, new[] { "1.3.1", "1.4.0" } },
             { FedoHud, new[] { "1.1.2" } }, { NoSmokeStayLit, new[] { "2.4.4" } }, { TameRidingOverhaul, new[] { "0.1.20" } },
             { Treadwell, new[] { "1.0.1" } }, { StarLevelSystem, new[] { "1.33.0", "1.34.0" } },
             { Jotunn, new[] { "2.30.2" } },
