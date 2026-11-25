@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.13
+
+- Works with Valheim 1.0.30, which now keeps the build menu from slowing down with each opening by itself.
+- Logging out and joining again in the same game run no longer makes each session use more memory than the last.
+- Claiming or abandoning an Epic Loot bounty no longer stalls the trader window for a tenth of a second or more with many open bounties, and Select all at the enchanting table updates its lists once.
+- An open crafting station, BetterUI's armour tooltip and MultiUserChest's chests cost less each frame.
+
 ## 1.0.12
 
 - A frost foundry's plinth sinks while it works and rises when the item is done, instead of staying where it was when the base was last loaded.
