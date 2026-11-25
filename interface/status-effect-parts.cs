@@ -74,6 +74,13 @@ namespace WorldPerformance
             return code;
         }
 
+        // The status effect list is destroyed with the world.
+        internal static void ForgetWorld()
+        {
+            kept.Clear();
+            last = null;
+        }
+
         private static Parts Of(Transform entry)
         {
             if (last != null && ReferenceEquals(last.Entry, entry)) return last;

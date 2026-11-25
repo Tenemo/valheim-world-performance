@@ -16,7 +16,8 @@ namespace WorldPerformance
     // and its generator's rivers and lakes go, and a tile still loaded at the start menu no longer names the generator in its
     // build, which it rebuilds for any other generator anyway; nothing reads them after the world is left, and the next world
     // builds its own. At the start menu the world, record manager and routed calls the network left behind are set back to
-    // what they were before the first join, and this mod's features let go of what they kept of the world.
+    // what they were before the first join, this mod's features let go of what they kept of the world, and so do other mods'
+    // and the game's static fields that ModWorldLeftovers names.
     internal static class WorldTeardown
     {
         private static readonly Harmony patches = new Harmony(Plugin.Id + ".world-teardown");
@@ -177,6 +178,8 @@ namespace WorldPerformance
             SpatialBuildings.ForgetWorld();
             IdleEffects.ForgetWorld();
             RestingDoors.ForgetWorld();
+            StatusEffectParts.ForgetWorld();
+            ModWorldLeftovers.ForgetWorld();
         }
     }
 }

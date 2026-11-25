@@ -173,6 +173,6 @@ namespace WorldPerformance
         // The shipped feature; the isolated client switches it off and on to compare memory after logouts.
         public static bool ReleaseDepartedWorlds { get => WorldTeardown.Releasing; set => WorldTeardown.Releasing = value; }
         public static bool GuardShieldRemoval { get => ShieldRemoval.Guarding; set => ShieldRemoval.Guarding = value; }
-        public static int[] WorldTeardownCounts() => new[] { WorldTeardown.Released, WorldTeardown.BuildsDropped, ShieldRemoval.Removed };
+        public static int[] WorldTeardownCounts() => new[] { WorldTeardown.Released, WorldTeardown.BuildsDropped, ShieldRemoval.Removed, ModWorldLeftovers.Released };
     }
 }

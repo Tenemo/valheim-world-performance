@@ -106,6 +106,7 @@ namespace WorldPerformance
             Guard(nameof(DeferredAssetUnload), DeferredAssetUnload.Start, DeferredAssetUnload.Stop);
             Guard(nameof(WorldTeardown), WorldTeardown.Start, WorldTeardown.Stop);
             Guard(nameof(ShieldRemoval), ShieldRemoval.Start, ShieldRemoval.Stop);
+            Guard(nameof(ModWorldLeftovers), ModWorldLeftovers.Start, ModWorldLeftovers.Stop);
             Guard(nameof(KeptStreamedAssets), KeptStreamedAssets.Start, KeptStreamedAssets.Stop);
             Guard(nameof(SnappingRenderMeshes), SnappingRenderMeshes.Start, SnappingRenderMeshes.Stop);
             Guard(nameof(TerrainRebuilds), TerrainRebuilds.Start, TerrainRebuilds.Stop);
@@ -148,7 +149,7 @@ namespace WorldPerformance
         // reported, and the calls after it in the same frame still run.
         private enum Tick { FarFlames, IdleEffects, RestingItemSparkles, LoadingThreadPriority, FrameReports, ConnectionLog, Renderer, SpatialBuildings,
             SmallFarShadows, SilencedLoops, UnusedParticleMeshes, SharedParticleMeshes, DeferredAssetUnload, KeptStreamedAssets, ServerAssetUnload,
-            MapDataPacking, SnappingRenderMeshes, WorldTeardown, FarFlamesCamera, SpatialBuildingsCamera, Count }
+            MapDataPacking, SnappingRenderMeshes, WorldTeardown, ModWorldLeftovers, FarFlamesCamera, SpatialBuildingsCamera, Count }
         private static readonly bool[] stoppedTicks = new bool[(int)Tick.Count];
 
         private static void Run(Tick tick, Action work, Action stop = null)
@@ -249,6 +250,7 @@ namespace WorldPerformance
             Run(Tick.MapDataPacking, MapDataPacking.LateUpdate, MapDataPacking.Stop);
             Run(Tick.SnappingRenderMeshes, SnappingRenderMeshes.LateUpdate, SnappingRenderMeshes.Stop);
             Run(Tick.WorldTeardown, WorldTeardown.LateUpdate, WorldTeardown.Stop);
+            Run(Tick.ModWorldLeftovers, ModWorldLeftovers.LateUpdate, ModWorldLeftovers.Stop);
         }
 
         // Starts the renderer once, with the first world; where it cannot run, rendering stays native.
@@ -286,6 +288,7 @@ namespace WorldPerformance
             Finish(DeferredAssetUnload.Stop);
             Finish(WorldTeardown.Stop);
             Finish(ShieldRemoval.Stop);
+            Finish(ModWorldLeftovers.Stop);
             Finish(KeptStreamedAssets.Stop);
             Finish(SnappingRenderMeshes.Stop);
             Finish(TerrainRebuilds.Stop);
