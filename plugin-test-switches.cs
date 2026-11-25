@@ -78,6 +78,9 @@ namespace WorldPerformance
         public static bool PackageFloatsRunning => PackageFloats.Running;
         public static long PackageFloatsCount => PackageFloats.Writes;
         public static bool LeanInventoryScreen { get => InventoryScreen.Lean; set => InventoryScreen.Lean = value; }
+        public static bool LeanArmorTooltip { get => ArmorTooltipText.Lean; set => ArmorTooltipText.Lean = value; }
+        public static bool LeanChestPreview { get => ChestMovePreview.Lean; set => ChestMovePreview.Lean = value; }
+        public static long ChestPreviewsSkipped => ChestMovePreview.Skipped;
         public static bool PoolCompression { get => PooledCompression.Pooling; set => PooledCompression.Pooling = value; }
         public static bool PooledCompressionRunning => PooledCompression.Running;
         public static bool PooledCompressionKeepsSendPackage => PooledCompression.KeepsSendPackage;
