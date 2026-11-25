@@ -32,7 +32,12 @@ namespace WorldPerformance
         private static PropertyInfo id;
         private static Type stepType, selectionType;
         private static ConditionalWeakTable<object, Knowledge> builtWith = new ConditionalWeakTable<object, Knowledge>();
-        private static readonly Dictionary<int, byte[]> drawnWith = new Dictionary<int, byte[]>();
+        // What each kept row was last drawn from, forgotten with the row.
+        private static readonly ConditionalWeakTable<Component, byte[]> drawnWith = new ConditionalWeakTable<Component, byte[]>();
+        // Raised when Epic Loot loads its adventure or biome configuration, whose names and texts a row shows.
+        private static int configuration;
+        private static readonly AccessTools.FieldRef<UITooltip> currentTooltip = AccessTools.StaticFieldRefAccess<UITooltip>(AccessTools.Field(typeof(UITooltip), "m_current"));
+        private static readonly AccessTools.FieldRef<GameObject> hoveredTooltip = AccessTools.StaticFieldRefAccess<GameObject>(AccessTools.Field(typeof(UITooltip), "m_hovered"));
         private static readonly AccessTools.FieldRef<Player, HashSet<string>> knownMaterials = AccessTools.FieldRefAccess<Player, HashSet<string>>("m_knownMaterial");
         private static readonly AccessTools.FieldRef<Player, HashSet<string>> knownRecipes = AccessTools.FieldRefAccess<Player, HashSet<string>>("m_knownRecipes");
         private static readonly AccessTools.FieldRef<Player, HashSet<string>> knownBiomes = AccessTools.FieldRefAccess<Player, HashSet<string>>("m_knownBiome");
@@ -57,8 +62,9 @@ namespace WorldPerformance
             var currencies = assembly.GetType("EpicLoot.Adventure.Currencies");
             var manager = assembly.GetType("EpicLoot.Adventure.AdventureDataManager");
             var feature = assembly.GetType("EpicLoot.Adventure.Feature.BountiesAdventureFeature");
+            var biomes = assembly.GetType("EpicLoot.Biomes.BiomeDataManager");
             if (merchant == null || panel == null || claimableType == null || availableType == null || shopType == null || gambleType == null || mapType == null ||
-                rowType == null || bounty == null || currencies == null || manager == null || feature == null)
+                rowType == null || bounty == null || currencies == null || manager == null || feature == null || biomes == null)
                 throw new InvalidOperationException("Epic Loot's trader window changed.");
             var basePanel = claimableType.BaseType;
             refreshItems = AccessTools.Method(panel, "RefreshItems", new[] { currencies });
@@ -89,12 +95,15 @@ namespace WorldPerformance
             var claimableItems = AccessTools.DeclaredMethod(claimableType, "RefreshItems", new[] { currencies });
             var availableItems = AccessTools.DeclaredMethod(availableType, "RefreshItems", new[] { currencies });
             var destroyAll = AccessTools.Method(basePanel, "DestroyAllListElementsInList");
+            var adventureLoaded = AccessTools.DeclaredMethod(manager, "Initialize");
+            var biomesLoaded = AccessTools.DeclaredMethod(biomes, "Rebuild", Type.EmptyTypes);
             if (refreshItems == null || refreshButton == null || clearSelection == null || needsRefresh == null || needsRefresh.ReturnType != typeof(bool) || forEachPanel == null || currenciesOf == null || panels == null || list == null ||
                 list.FieldType != typeof(RectTransform) || prefab == null || prefab.FieldType != rowType || current == null || current.FieldType != typeof(int) ||
                 selectedIndex == null || selectedIndex.FieldType != typeof(int) || selected == null || bountyOf == null || bountyOf.FieldType != bounty ||
                 onSelected == null || onSelected.FieldType != typeof(Action<>).MakeGenericType(bounty) || setItem == null || setSelected == null || toPackage == null ||
                 id == null || id.PropertyType != typeof(string) || bounties == null || bounties.FieldType != feature || claimable == null || available == null ||
                 interval == null || claim == null || abandon == null || refreshAll == null || claimableItems == null || availableItems == null || destroyAll == null ||
+                adventureLoaded == null || biomesLoaded == null ||
                 basePanel != availableType.BaseType || !typeof(IList).IsAssignableFrom(claimable.ReturnType) || !typeof(IList).IsAssignableFrom(available.ReturnType))
                 throw new InvalidOperationException("Epic Loot's trader window changed.");
             stepType = typeof(Action<>).MakeGenericType(panel);
@@ -109,6 +118,8 @@ namespace WorldPerformance
             harmony.Patch(claim, prefix: new HarmonyMethod(self, nameof(BountyChange)), finalizer: new HarmonyMethod(self, nameof(BountyChanged)));
             harmony.Patch(abandon, prefix: new HarmonyMethod(self, nameof(BountyChange)), finalizer: new HarmonyMethod(self, nameof(BountyChanged)));
             harmony.Patch(refreshAll, prefix: new HarmonyMethod(self, nameof(RefreshAll)));
+            harmony.Patch(adventureLoaded, postfix: new HarmonyMethod(self, nameof(ConfigurationLoaded)));
+            harmony.Patch(biomesLoaded, postfix: new HarmonyMethod(self, nameof(ConfigurationLoaded)));
             harmony.Patch(claimableItems, prefix: new HarmonyMethod(self, nameof(RefreshClaimable)));
             harmony.Patch(availableItems, prefix: new HarmonyMethod(self, nameof(RefreshAvailable)));
             foreach (var shop in new[] { shopType, gambleType, mapType })
@@ -126,6 +137,7 @@ namespace WorldPerformance
             return ready > 0;
         }
 
+        private static void ConfigurationLoaded() => configuration++;
         private static void BountyChange() => bountyChange = true;
         private static void BountyChanged() => bountyChange = false;
 
@@ -217,20 +229,22 @@ namespace WorldPerformance
                 string key = (string)id.GetValue(bountyOf.GetValue(row), null);
                 if (wanted.ContainsKey(key)) continue;
                 rows.Remove(key);
-                drawnWith.Remove(row.GetInstanceID());
+                drawnWith.Remove(row);
                 Removed++;
                 UnityEngine.Object.DestroyImmediate(child.gameObject);
             }
             selectedIndex.SetValue(panel, -1);
             var template = (Component)prefab.GetValue(panel);
+            var keptRows = new List<Component>();
             for (int index = 0; index < items.Count; index++)
             {
                 var item = items[index];
                 byte[] content = Content(item);
-                if (rows.TryGetValue(ids[index], out var row) && drawnWith.TryGetValue(row.GetInstanceID(), out var drawn) && drawn.SequenceEqual(content))
+                if (rows.TryGetValue(ids[index], out var row) && drawnWith.TryGetValue(row, out var drawn) && drawn.SequenceEqual(content))
                 {
                     // Every value the row shows comes from these, so only the bounty it hands to the buttons changes.
                     bountyOf.SetValue(row, item);
+                    keptRows.Add(row);
                     Kept++;
                 }
                 else
@@ -242,29 +256,58 @@ namespace WorldPerformance
                         Created++;
                     }
                     else Drawn++;
+                    if (row != null && rows.ContainsKey(ids[index])) keptRows.Add(row);
                     Call(setItem, row, item);
-                    drawnWith[row.GetInstanceID()] = content;
+                    drawnWith.Remove(row);
+                    drawnWith.Add(row, content);
                 }
                 row.transform.SetSiblingIndex(index);
                 onSelected.SetValue(row, Delegate.CreateDelegate(selectionType, new Selection(panel, index), Selection.Method));
                 Call(setSelected, row, false);
             }
+            Recreated(keptRows);
             return true;
+        }
+
+        // Epic Loot's redraw destroys every row, which hides the tooltip of the one pointed at and empties the interface's
+        // selection; the next frame the pointer enters the new row and its tooltip shows after the usual delay. A row kept
+        // in place does the same: its tooltip starts over and a selection on it is let go.
+        private static void Recreated(List<Component> keptRows)
+        {
+            var events = UnityEngine.EventSystems.EventSystem.current;
+            var selection = events == null ? null : events.currentSelectedGameObject;
+            var tooltip = currentTooltip();
+            foreach (var row in keptRows)
+            {
+                if (selection != null && selection.transform.IsChildOf(row.transform)) events.SetSelectedGameObject(null);
+                if (tooltip != null && tooltip.transform.IsChildOf(row.transform))
+                {
+                    var hovered = hoveredTooltip();
+                    UITooltip.HideTooltip();
+                    if (hovered != null && ZInput.IsMouseActive() && !ZInput.IsExclusiveGamepadActive()) tooltip.OnHoverStart(hovered);
+                }
+            }
         }
 
         // Epic Loot's own redraw, when its rows cannot be matched to bounties; the rows it destroys are forgotten.
         private static bool Native(object panel, object feature)
         {
             var parent = (RectTransform)list.GetValue(panel);
-            for (int index = 0; index < parent.childCount; index++) drawnWith.Remove(parent.GetChild(index).GetComponent(rowType)?.GetInstanceID() ?? 0);
+            for (int index = 0; index < parent.childCount; index++)
+            {
+                var row = parent.GetChild(index).GetComponent(rowType);
+                if (row != null) drawnWith.Remove(row);
+            }
             return false;
         }
 
-        // What a row shows of its bounty: everything the bounty saves, and the language the texts are in.
+        // What a row shows of its bounty: everything the bounty saves, the language the texts are in and the configuration that
+        // names them.
         private static byte[] Content(object bounty)
         {
             var package = new ZPackage();
             package.Write(Localization.instance.GetSelectedLanguage());
+            package.Write(configuration);
             Call(toPackage, bounty, package);
             return package.GetArray();
         }
