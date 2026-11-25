@@ -7,14 +7,14 @@ namespace WorldPerformance
 {
     // About once a second the game rechecks the support of each piece it owns. A piece resting on other pieces remembers
     // the supporters its last full check found and confirms, for each, that it still exists and supports, that its
-    // collider is where it was and that its support is unchanged; it then returns without changing anything. At a large
-    // base that is about ten supporters a piece and two fifths of the wear updater, each reaching the collider's transform
-    // through the engine and the supporter's support through its network view. A collider's transform never changes, so
-    // each piece keeps the transforms of the colliders it remembers, matched to the game's own list on every check, and an
-    // owned supporter's support is its own field, which is what the game returns for an owner. The check passes only where
-    // the game's would, and then returns as the game's does; anything else runs the game's check.
-    // Clients only: a dedicated server keeps its own reference position outside the world, so it creates no pieces to check,
-    // and the 1.0.20 server's check has no remembered supporter list.
+    // collider is where it was and that its support is unchanged, and that the strongest of them supports more than the piece
+    // itself; it then returns without changing anything. At a large base that is about ten supporters a piece and two fifths
+    // of the wear updater, each reaching the collider's transform through the engine and the supporter's support through its
+    // network view. A collider's transform never changes, so each piece keeps the transforms of the colliders it remembers,
+    // matched to the game's own list on every check, and an owned supporter's support is its own field, which is what the
+    // game returns for an owner. The check passes only where the game's would, and then returns as the game's does;
+    // anything else runs the game's check.
+    // Clients only: a dedicated server keeps its own reference position outside the world, so it creates no pieces to check.
     internal static class SettledSupport
     {
         // A piece's kept colliders and their transforms, and ground support's state for it.
@@ -108,7 +108,7 @@ namespace WorldPerformance
                 if (value > strongest) strongest = value;
                 if (!value.Equals(supports[index])) return true;
             }
-            if (!(strongest >= support(__instance))) return true;
+            if (!(strongest > support(__instance))) return true;
             LastPassed = true;
             Passed++;
             return Shadow;
