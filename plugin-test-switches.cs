@@ -170,5 +170,6 @@ namespace WorldPerformance
         public static long[] SpatialBuildingsCropCounts() => SpatialBuildings.CropCounts();
         public static bool SpatialBuildingsSmallShadowsNear { get => SpatialBuildings.SmallShadowsNear; set => SpatialBuildings.SetSmallShadowsNear(value); }
         public static string SpatialBuildingsDescribe(ZNetView view, Vector3 camera) => SpatialBuildings.Describe(view, camera);
+        public static bool GuardShieldRemoval { get => ShieldRemoval.Guarding; set => ShieldRemoval.Guarding = value; }
     }
 }

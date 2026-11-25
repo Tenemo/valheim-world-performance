@@ -104,6 +104,7 @@ namespace WorldPerformance
             Guard(nameof(MapDataPacking), MapDataPacking.Start, MapDataPacking.Stop);
             Guard(nameof(CloudWriteBuffers), CloudWriteBuffers.Start);
             Guard(nameof(DeferredAssetUnload), DeferredAssetUnload.Start, DeferredAssetUnload.Stop);
+            Guard(nameof(ShieldRemoval), ShieldRemoval.Start, ShieldRemoval.Stop);
             Guard(nameof(KeptStreamedAssets), KeptStreamedAssets.Start, KeptStreamedAssets.Stop);
             Guard(nameof(SnappingRenderMeshes), SnappingRenderMeshes.Start, SnappingRenderMeshes.Stop);
             Guard(nameof(TerrainRebuilds), TerrainRebuilds.Start, TerrainRebuilds.Stop);
@@ -281,6 +282,7 @@ namespace WorldPerformance
             Finish(SharedWaterTime.Stop);
             Finish(MapDataPacking.Stop);
             Finish(DeferredAssetUnload.Stop);
+            Finish(ShieldRemoval.Stop);
             Finish(KeptStreamedAssets.Stop);
             Finish(SnappingRenderMeshes.Stop);
             Finish(TerrainRebuilds.Stop);
