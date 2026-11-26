@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.14
+
+- StarLevelSystem 1.35.0 and Network Performance System 1.19.0 are supported.
+
 ## 1.0.13
 
 - Works with Valheim 1.0.30, which now keeps the build menu from slowing down with each opening by itself.
